@@ -12,6 +12,12 @@ const routes = [
     component: () => import('../views/PlayerDetail.vue'),
     props: true,
   },
+  {
+    path: '/replay/:id',
+    name: 'MatchReplay',
+    component: () => import('../views/Replay.vue'),
+    props: true,
+  },
 ];
 
 const router = createRouter({

@@ -48,6 +48,7 @@
       <MatchList
         :matches="matches"
         :loading="loadingMatches"
+        :current-player-name="(route.params.name as string)"
       />
 
       <!-- 分页组件 -->

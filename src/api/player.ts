@@ -14,3 +14,11 @@ export const getPlayerMatches = (name: string, limit = 20, offset = 0, filter?: 
 export const getSystemStats = (): Promise<{ players: number, matches: number }> => {
   return request.get('/system/stats');
 };
+
+export const getMatchTelemetry = (matchId: string): Promise<any[]> => {
+  return request.get(`/matches/${matchId}/telemetry`);
+};
+
+export const getMatchDetails = (matchId: string): Promise<any> => {
+  return request.get(`/matches/${matchId}`);
+};

@@ -44,6 +44,9 @@
           </div>
 
           <div class="match-detail-btn">
+            <el-button size="small" type="primary" plain @click="goToReplay(match.matchId)">
+              对局回放
+            </el-button>
             <el-button size="small" link @click="toggleDetail(match.matchId)">
               {{ expandedMatches[match.matchId] ? '收起' : '详情' }}
               <el-icon :class="{ 'is-active': expandedMatches[match.matchId] }">
@@ -147,6 +150,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { PlayerMatchResponse } from '../types'
 import { ArrowDown, Timer, Aim, FirstAidKit } from '@element-plus/icons-vue'
 import {
@@ -156,9 +160,10 @@ import {
   DEATH_TYPE_DICT
 } from '../utils/constants'
 
-defineProps<{
+const props = defineProps<{
   matches: PlayerMatchResponse[]
   loading: boolean
+  currentPlayerName?: string
 }>()
 
 const expandedMatches = ref<Record<string, boolean>>({})
@@ -192,6 +197,14 @@ const formatDuration = (seconds: number) => {
 
 const formatDeathType = (type: string) => {
   return DEATH_TYPE_DICT[type] || type
+}
+
+const router = useRouter()
+const goToReplay = (matchId: string) => {
+  router.push({
+    path: `/replay/${matchId}`,
+    query: { player: props.currentPlayerName }
+  })
 }
 </script>
 
