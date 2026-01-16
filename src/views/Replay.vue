@@ -135,15 +135,16 @@
         </div>
 
         <div class="kill-feed">
-          <div class="section-title">击杀信息 (点击定位)</div>
+          <div class="section-title">战况播报 (点击定位)</div>
           <el-scrollbar height="150px">
             <div
               v-for="(kill, index) in killFeed"
               :key="index"
               class="kill-item"
-              :class="{ 'is-groggy': kill.isGroggy }"
+              :class="{ 'is-groggy': kill.isGroggy, 'is-revive': kill.isRevive, 'is-respawn': kill.isRespawn }"
               @click="seekToKill(kill.time)"
             >
+              <span class="time">[{{ getRelativeTime(kill.time) }}]</span>
               <span class="killer">{{ kill.killer }}</span>
               <span class="action">{{ kill.action }}</span>
               <span class="victim">{{ kill.victim }}</span>
@@ -558,6 +559,11 @@ const alivePlayers = computed(() => {
 })
 
 const groupedPlayers = computed(() => {
+  // 显式读取所有玩家的 isAlive 状态，建立响应式依赖，确保复活后小队统计实时更新
+  Object.values(playersState.value).forEach(p => {
+    void p.isAlive // 建立响应式追踪
+  })
+  
   const groups: Record<number, any[]> = {}
   Object.values(playersState.value).forEach(p => {
     const teamId = p.teamId || 0
@@ -580,6 +586,11 @@ const formatTime = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+const getRelativeTime = (eventTime: number) => {
+  const startTime = eventTimestamps[0] || 0
+  return formatTime(Math.max(0, (eventTime - startTime) / 1000))
+}
+
 const WEAPON_CATEGORIES: Record<string, string> = {
   // Handguns
   'Item_Weapon_Sawnoff_C': 'handgun',
@@ -600,9 +611,9 @@ const WEAPON_CATEGORIES: Record<string, string> = {
   'Item_Weapon_Molotov_C': 'throwable',
   'Item_Weapon_FlashBang_C': 'throwable',
   'Item_Weapon_DecoyGrenade_C': 'throwable',
+  'Item_Weapon_SmokeBomb_C': 'throwable',
   'Item_Weapon_StickyGrenade_C': 'throwable',
   'Item_Weapon_C4_C': 'throwable',
-  'Item_Weapon_SmokeBomb_C': 'throwable',
 }
 
 const getItemImagePath = (itemId: string) => {
@@ -794,6 +805,25 @@ const updateState = (time: number) => {
           p.x = event.character.location.x
           p.y = event.character.location.y
           p.hp = event.character.health
+          
+          // 逻辑修正：区分“复活”与“扶起”
+          // 如果玩家之前是死亡状态，且现在出现在高空（飞机上 z > 10000），判定为蓝卡复活回归
+          if (!p.isAlive && event.character.location.z > 10000) {
+            p.isAlive = true
+            killFeed.value.unshift({
+              killer: p.name,
+              victim: '',
+              action: '重新进入了战场',
+              isGroggy: false,
+              isRevive: false,
+              isRespawn: true,
+              time: eventTime
+            })
+          } else if (!p.isAlive && p.hp > 0) {
+            // 兜底：如果血量恢复但不在飞机上，说明是错过了扶起事件
+            p.isAlive = true
+          }
+          
           if (event.character.location.z < 2000 && event.character.orientation) {
              p.yaw = event.character.orientation.yaw || 0
           }
@@ -842,6 +872,19 @@ const updateState = (time: number) => {
       case 'LogPlayerRevive':
         if (event.reviver && playersState.value[event.reviver.name]) {
           playersState.value[event.reviver.name].revives++
+        }
+        if (event.victim && playersState.value[event.victim.name]) {
+          const v = playersState.value[event.victim.name]
+          v.isAlive = true
+          v.hp = event.victim.health || 20 // 扶起后通常有少量血量
+          killFeed.value.unshift({
+            killer: event.reviver ? event.reviver.name : 'Unknown',
+            victim: event.victim.name,
+            action: '扶起了',
+            isGroggy: false,
+            isRevive: true,
+            time: eventTime
+          })
         }
         break
       case 'LogPlayerKillV2':
@@ -1463,11 +1506,26 @@ onUnmounted(() => {
     background-color: rgba(64, 158, 255, 0.15);
   }
 
+  .time {
+    color: #666;
+    margin-right: 8px;
+    font-family: monospace;
+  }
+
   .killer { color: #67c23a; font-weight: bold; } // 击杀者显示为绿色
   .victim { color: #999; }
   .action { margin: 0 5px; color: #666; }
   &.is-groggy {
     .action { color: #e6a23c; } // 击倒显示为黄色
+  }
+
+  &.is-revive {
+    .action { color: #67c23a; } // 扶起/复活显示为绿色（正面反馈）
+  }
+
+  &.is-respawn {
+    .killer { color: #409eff; }
+    .action { color: #409eff; font-weight: bold; }
   }
 }
 </style>

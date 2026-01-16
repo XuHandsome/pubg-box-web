@@ -123,9 +123,9 @@ const chartOption = computed(() => {
     },
     grid: {
       left: '3%',
-      right: '3%',
+      right: '12%',
       bottom: '3%',
-      top: '25%',
+      top: '30%',
       containLabel: true
     },
     xAxis: {
@@ -138,16 +138,27 @@ const chartOption = computed(() => {
     yAxis: [
       {
         type: 'value',
-        name: '数值',
+        name: '击杀',
+        nameTextStyle: { color: '#42b883', fontSize: 10 },
         splitLine: { lineStyle: { color: '#333' } },
-        axisLabel: { color: '#666' }
+        axisLabel: { color: '#666', fontSize: 10 }
       },
       {
         type: 'value',
         name: '排名',
-        inverse: true, // 排名越小越好，反转坐标轴
+        nameTextStyle: { color: '#f56c6c', fontSize: 10 },
+        inverse: true,
         splitLine: { show: false },
-        axisLabel: { color: '#666' }
+        axisLabel: { color: '#666', fontSize: 10 }
+      },
+      {
+        type: 'value',
+        name: '伤害',
+        nameTextStyle: { color: '#409eff', fontSize: 10 },
+        position: 'right',
+        offset: 35,
+        splitLine: { show: false },
+        axisLabel: { color: '#666', fontSize: 10 }
       }
     ],
     series: [
@@ -163,6 +174,7 @@ const chartOption = computed(() => {
       {
         name: '击杀',
         type: 'line',
+        yAxisIndex: 0,
         smooth: true,
         data: chartData.map(m => m.kills),
         itemStyle: { color: '#42b883' },
@@ -171,8 +183,9 @@ const chartOption = computed(() => {
       {
         name: '伤害',
         type: 'line',
+        yAxisIndex: 2,
         smooth: true,
-        data: chartData.map(m => Math.floor(m.damageDealt / 10)), // 缩放一下伤害显示在同一坐标系，或者使用多轴
+        data: chartData.map(m => Math.round(m.damageDealt)),
         itemStyle: { color: '#409eff' },
         lineStyle: { width: 2 }
       }
