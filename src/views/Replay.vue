@@ -57,6 +57,44 @@
       </div>
 
       <div class="sidebar">
+        <!-- 装备悬浮窗 (全局单例，避免被 scrollbar 裁剪) -->
+        <div v-if="hoveredPlayer && playersState[hoveredPlayer]"
+             class="equipment-popup"
+             :style="{ top: hoveredPlayerTop + 'px' }">
+          <div class="equip-section gear">
+            <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.helmet]">
+              <img v-if="playersState[hoveredPlayer].items.helmet" :src="getItemImagePath(playersState[hoveredPlayer].items.helmet)" />
+              <div v-else class="empty-slot">头</div>
+            </div>
+            <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.vest]">
+              <img v-if="playersState[hoveredPlayer].items.vest" :src="getItemImagePath(playersState[hoveredPlayer].items.vest)" />
+              <div v-else class="empty-slot">甲</div>
+            </div>
+            <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.backpack]">
+              <img v-if="playersState[hoveredPlayer].items.backpack" :src="getItemImagePath(playersState[hoveredPlayer].items.backpack)" />
+              <div v-else class="empty-slot">包</div>
+            </div>
+          </div>
+          <div class="equip-section weapons">
+            <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon1]">
+              <img v-if="playersState[hoveredPlayer].items.weapon1" :src="getItemImagePath(playersState[hoveredPlayer].items.weapon1)" />
+              <div v-else class="empty-slot">1</div>
+            </div>
+            <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon2]">
+              <img v-if="playersState[hoveredPlayer].items.weapon2" :src="getItemImagePath(playersState[hoveredPlayer].items.weapon2)" />
+              <div v-else class="empty-slot">2</div>
+            </div>
+            <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon3]">
+              <img v-if="playersState[hoveredPlayer].items.weapon3" :src="getItemImagePath(playersState[hoveredPlayer].items.weapon3)" />
+              <div v-else class="empty-slot">3</div>
+            </div>
+            <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon4]">
+              <img v-if="playersState[hoveredPlayer].items.weapon4" :src="getItemImagePath(playersState[hoveredPlayer].items.weapon4)" />
+              <div v-else class="empty-slot">4</div>
+            </div>
+          </div>
+        </div>
+
         <div class="player-list">
           <div class="section-title">玩家与战绩统计 ({{ alivePlayers.length }} 存活)</div>
           <el-scrollbar height="100%">
@@ -74,8 +112,8 @@
                 class="player-item"
                 :class="{ 'is-dead': !player.isAlive, 'is-focused': focusedPlayer === player.name }"
                 @click="focusPlayer(player.name)"
-                @mouseenter="hoveredPlayer = player.name"
-                @mouseleave="hoveredPlayer = null"
+                @mouseenter="handleMouseEnter($event, player.name)"
+                @mouseleave="handleMouseLeave"
               >
                 <div class="player-main">
                   <div class="player-color" :style="{ backgroundColor: getPlayerColor(player) }"></div>
@@ -133,6 +171,7 @@ const matchId = route.params.id as string
 const loading = ref(true)
 const match = ref<any>(null)
 const telemetry = ref<any[]>([])
+const itemNames = ref<Record<string, string>>({}) // itemId.json 映射
 let eventTimestamps: number[] = [] // 预计算的时间戳
 let lastProcessedTime = -1 // 上一次处理到的相对时间
 
@@ -475,6 +514,18 @@ const updateMarkers = () => {
 
 const focusedPlayer = ref<string | null>(null)
 const hoveredPlayer = ref<string | null>(null)
+const hoveredPlayerTop = ref(0)
+
+const handleMouseEnter = (event: MouseEvent, name: string) => {
+  hoveredPlayer.value = name
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  // 计算悬浮窗相对于视口的位置，并稍微向上偏移一点使其居中对齐行
+  hoveredPlayerTop.value = Math.max(10, rect.top - 20)
+}
+
+const handleMouseLeave = () => {
+  hoveredPlayer.value = null
+}
 
 // 模拟玩家颜色
 const playerColors: Record<string, string> = {}
@@ -529,15 +580,62 @@ const formatTime = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+const WEAPON_CATEGORIES: Record<string, string> = {
+  // Handguns
+  'Item_Weapon_Sawnoff_C': 'handgun',
+  'Item_Weapon_G18_C': 'handgun',
+  'Item_Weapon_M9_C': 'handgun',
+  'Item_Weapon_NagantM1895_C': 'handgun',
+  'Item_Weapon_DEagle_C': 'handgun',
+  'Item_Weapon_M1911_C': 'handgun',
+  'Item_Weapon_vz61Skorpion_C': 'handgun',
+  'Item_Weapon_Rhino_C': 'handgun',
+  // Melee
+  'Item_Weapon_Cowbar_C': 'melee',
+  'Item_Weapon_Pan_C': 'melee',
+  'Item_Weapon_Machete_C': 'melee',
+  'Item_Weapon_Sickle_C': 'melee',
+  // Throwable
+  'Item_Weapon_Grenade_C': 'throwable',
+  'Item_Weapon_Molotov_C': 'throwable',
+  'Item_Weapon_FlashBang_C': 'throwable',
+  'Item_Weapon_DecoyGrenade_C': 'throwable',
+  'Item_Weapon_StickyGrenade_C': 'throwable',
+  'Item_Weapon_C4_C': 'throwable',
+  'Item_Weapon_SmokeBomb_C': 'throwable',
+}
+
+const getItemImagePath = (itemId: string) => {
+  if (!itemId) return ''
+
+  // 规范化装备 ID（例如 Item_Head_E_01_Lv1_C -> Item_Head_E_00_Lv1_C）
+  // 许多素材文件以 00 命名
+  const normalizedId = itemId.replace(/_0[1-9]_/, '_00_')
+
+  if (normalizedId.startsWith('Item_Head')) return `/assets/item/Equipment/Headgear/${normalizedId}.png`
+  if (normalizedId.startsWith('Item_Armor')) return `/assets/item/Equipment/Vest/${normalizedId}.png`
+  if (normalizedId.startsWith('Item_Back')) return `/assets/item/Equipment/Backpack/${normalizedId}.png`
+
+  if (normalizedId.startsWith('Item_Weapon')) {
+    const cat = WEAPON_CATEGORIES[normalizedId] || 'main'
+    const folder = cat.charAt(0).toUpperCase() + cat.slice(1)
+    return `/assets/item/Weapon/${folder}/${normalizedId}.png`
+  }
+
+  return ''
+}
+
 const fetchData = async () => {
   try {
     loading.value = true
-    const [matchData, telemetryData] = await Promise.all([
+    const [matchData, telemetryData, itemsData] = await Promise.all([
       getMatchDetails(matchId),
-      getMatchTelemetry(matchId)
+      getMatchTelemetry(matchId),
+      fetch('/assets/itemId.json').then(res => res.json())
     ])
     match.value = matchData
     telemetry.value = telemetryData
+    itemNames.value = itemsData
 
     if (telemetry.value.length > 0) {
       // 预计算所有事件的时间戳，避免在循环中重复解析日期字符串
@@ -627,7 +725,16 @@ const initPlayers = () => {
           revives: 0,
           damage: 0,
           yaw: 0,
-          lastAttackTime: 0
+          lastAttackTime: 0,
+          items: {
+            helmet: '',
+            vest: '',
+            backpack: '',
+            weapon1: '',
+            weapon2: '',
+            weapon3: '',
+            weapon4: ''
+          }
         }
       }
     }
@@ -654,6 +761,15 @@ const updateState = (time: number) => {
       p.revives = 0
       p.damage = 0
       p.lastAttackTime = 0
+      p.items = {
+        helmet: '',
+        vest: '',
+        backpack: '',
+        weapon1: '',
+        weapon2: '',
+        weapon3: '',
+        weapon4: ''
+      }
     })
     killFeed.value = []
     airdrops.value = []
@@ -765,6 +881,59 @@ const updateState = (time: number) => {
             radius: event.radius
         }
         break
+      case 'LogItemDrop':
+      case 'LogItemPickup': // 拾取作为备选，仅针对护具
+      case 'LogItemEquip': {
+        const char = event.character || event.attacker || event.victim
+        if (!char || !char.name) break
+
+        const p = playersState.value[char.name]
+        if (!p) break
+
+        const itemId = event.item?.itemId
+        if (!itemId) break
+
+        if (event._T === 'LogItemDrop') {
+          if (p.items.helmet === itemId) p.items.helmet = ''
+          else if (p.items.vest === itemId) p.items.vest = ''
+          else if (p.items.backpack === itemId) p.items.backpack = ''
+          else if (p.items.weapon1 === itemId) p.items.weapon1 = ''
+          else if (p.items.weapon2 === itemId) p.items.weapon2 = ''
+          else if (p.items.weapon3 === itemId) p.items.weapon3 = ''
+          else if (p.items.weapon4 === itemId) p.items.weapon4 = ''
+          break
+        }
+
+        if (itemId.startsWith('Item_Head')) p.items.helmet = itemId
+        else if (itemId.startsWith('Item_Armor')) p.items.vest = itemId
+        else if (itemId.startsWith('Item_Back')) p.items.backpack = itemId
+        else if (itemId.startsWith('Item_Weapon')) {
+          const cat = WEAPON_CATEGORIES[itemId] || 'main'
+          if (cat === 'handgun') p.items.weapon3 = itemId
+          else if (cat === 'melee' || cat === 'throwable') p.items.weapon4 = itemId
+          else {
+            if (p.items.weapon1 === itemId || p.items.weapon2 === itemId) break
+            if (!p.items.weapon1) p.items.weapon1 = itemId
+            else p.items.weapon2 = itemId
+          }
+        }
+        break
+      }
+      case 'LogItemUnequip': {
+        const p = playersState.value[event.character?.name]
+        if (!p) break
+        const itemId = event.item?.itemId
+        if (!itemId) break
+
+        if (p.items.helmet === itemId) p.items.helmet = ''
+        else if (p.items.vest === itemId) p.items.vest = ''
+        else if (p.items.backpack === itemId) p.items.backpack = ''
+        else if (p.items.weapon1 === itemId) p.items.weapon1 = ''
+        else if (p.items.weapon2 === itemId) p.items.weapon2 = ''
+        else if (p.items.weapon3 === itemId) p.items.weapon3 = ''
+        else if (p.items.weapon4 === itemId) p.items.weapon4 = ''
+        break
+      }
     }
   }
   lastProcessedTime = time
@@ -1193,6 +1362,61 @@ onUnmounted(() => {
       .el-icon {
         font-size: 12px;
       }
+    }
+  }
+}
+
+.equipment-popup {
+  position: fixed; // 关键：使用 fixed 避免被父容器 overflow: hidden 裁剪
+  right: 310px;    // 侧边栏宽度 300px + 10px 间距
+  width: 160px;
+  background-color: rgba(30, 30, 30, 0.95);
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 10px;
+  z-index: 2500;   // 确保高于地图和侧边栏
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  transition: top 0.1s ease-out;
+
+  .equip-section {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+
+    &.weapons {
+      flex-wrap: wrap;
+    }
+  }
+
+  .equip-slot {
+    width: 40px;
+    height: 40px;
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid #555;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .empty-slot {
+      font-size: 10px;
+      color: #555;
+    }
+
+    &.weapon {
+      width: 65px;
+      height: 35px;
     }
   }
 }
