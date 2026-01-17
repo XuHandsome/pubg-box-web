@@ -145,14 +145,37 @@
         </el-collapse-transition>
       </div>
     </div>
+    <!-- 对局回放弹窗 -->
+    <el-dialog
+      v-model="showReplay"
+      width="fit-content"
+      top="1vh"
+      destroy-on-close
+      :show-close="false"
+      :close-on-click-modal="false"
+      class="replay-dialog"
+    >
+      <Replay
+        v-if="showReplay"
+        :id="currentReplayId"
+        :player="currentPlayerName"
+        :is-dialog="true"
+      />
+      <template #footer>
+        <div style="text-align: center; margin-top: -10px; padding-bottom: 10px;">
+          <el-button @click="showReplay = false" type="info" plain size="small">关闭回放 (ESC)</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import type { PlayerMatchResponse } from '../types'
 import { ArrowDown, Timer, Aim, FirstAidKit } from '@element-plus/icons-vue'
+import Replay from '../views/Replay.vue'
 import {
   MAP_NAME_DICT,
   GAME_MODE_DICT,
@@ -167,6 +190,8 @@ const props = defineProps<{
 }>()
 
 const expandedMatches = ref<Record<string, boolean>>({})
+const showReplay = ref(false)
+const currentReplayId = ref('')
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return '-'
@@ -199,12 +224,10 @@ const formatDeathType = (type: string) => {
   return DEATH_TYPE_DICT[type] || type
 }
 
-const router = useRouter()
-const goToReplay = (matchId: string) => {
-  router.push({
-    path: `/replay/${matchId}`,
-    query: { player: props.currentPlayerName }
-  })
+const goToReplay = async (matchId: string) => {
+  currentReplayId.value = matchId
+  await nextTick()
+  showReplay.value = true
 }
 </script>
 
@@ -350,5 +373,12 @@ const goToReplay = (matchId: string) => {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;
   color: var(--el-text-color-secondary);
+}
+
+:deep(.replay-dialog) {
+  background: transparent !important;
+  box-shadow: none !important;
+  .el-dialog__header { display: none; }
+  .el-dialog__body { padding: 0 !important; }
 }
 </style>

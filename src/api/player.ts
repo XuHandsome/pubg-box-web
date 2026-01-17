@@ -19,6 +19,8 @@ export const getMatchTelemetry = (matchId: string): Promise<any[]> => {
   return request.get(`/matches/${matchId}/telemetry`);
 };
 
-export const getMatchDetails = (matchId: string): Promise<any> => {
-  return request.get(`/matches/${matchId}`);
+export const getMatchDetails = (matchId: string, playerName?: string): Promise<any> => {
+  return request.get(`/matches/${matchId}`, {
+    params: { player: playerName }
+  });
 };

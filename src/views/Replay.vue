@@ -1,169 +1,194 @@
 <template>
-  <div class="replay-container" v-loading="loading">
-    <div class="replay-header">
-      <div class="left">
-        <el-button :icon="ArrowLeft" circle @click="$router.back()" />
-        <span class="title">对局回放 - {{ match?.matchId }}</span>
-      </div>
-      <div class="controls" v-if="!loading">
-        <el-button-group>
-          <el-button :icon="isPlaying ? VideoPause : VideoPlay" @click="togglePlay">
-            {{ isPlaying ? '暂停' : '播放' }}
-          </el-button>
-          <el-button @click="resetPlayback">重置</el-button>
-        </el-button-group>
-        <div class="speed-control">
-          <span>倍速:</span>
-          <el-select v-model="playSpeed" style="width: 80px">
-            <el-option label="1x" :value="1" />
-            <el-option label="2x" :value="2" />
-            <el-option label="5x" :value="5" />
-            <el-option label="10x" :value="10" />
-            <el-option label="20x" :value="20" />
-          </el-select>
-        </div>
-        <div class="time-slider">
-          <span>{{ formatTime(currentTime) }} / {{ formatTime(maxTime) }}</span>
-          <div class="slider-wrapper">
-            <el-slider v-model="currentTime" :max="maxTime" :format-tooltip="formatTime" @input="onSliderChange" />
-            <div
-              v-if="matchStartTime > 0"
-              class="start-marker"
-              :style="{ left: (matchStartTime / maxTime * 100) + '%' }"
-              title="登机时刻"
-            ></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="replay-content">
-      <div class="map-wrapper">
-        <div id="map" class="map-container"></div>
-        <div class="zoom-control" v-if="mapInstance">
-          <el-icon class="zoom-icon" @click="changeZoom(0.5)"><Plus /></el-icon>
-          <el-slider
-            v-model="currentZoom"
-            vertical
-            height="120px"
-            :min="minZoom"
-            :max="4"
-            :step="0.01"
-            :show-tooltip="false"
-            @input="onZoomSliderChange"
-          />
-          <el-icon class="zoom-icon" @click="changeZoom(-0.5)"><Minus /></el-icon>
-        </div>
-      </div>
-
-      <div class="sidebar">
-        <!-- 装备悬浮窗 (全局单例，避免被 scrollbar 裁剪) -->
-        <div v-if="hoveredPlayer && playersState[hoveredPlayer]"
-             class="equipment-popup"
-             :style="{ top: hoveredPlayerTop + 'px' }">
-          <div class="equip-section gear">
-            <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.helmet]">
-              <img v-if="playersState[hoveredPlayer].items.helmet" 
-                   :src="getItemImagePath(playersState[hoveredPlayer].items.helmet)"
-                   @error="(e: any) => e.target.style.display='none'" />
-              <div class="empty-slot">头</div>
+  <div class="replay-container" :class="{ 'is-dialog': isDialog }" v-loading="loading">
+    <div class="replay-layout">
+      <div class="replay-header">
+        <div class="left">
+          <el-button v-if="!isDialog" :icon="ArrowLeft" circle @click="$router.back()" />
+          <div class="match-info" v-if="match">
+            <div class="title-row">
+              <div class="title">{{ MAP_NAME_DICT[match.mapName] || match.mapName }} - {{ GAME_MODE_DICT[match.gameMode] || match.gameMode }}</div>
+              <el-tooltip content="复制分享链接" placement="top">
+                <el-icon class="share-icon" @click="copyShareLink"><Share /></el-icon>
+              </el-tooltip>
             </div>
-            <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.vest]">
-              <img v-if="playersState[hoveredPlayer].items.vest" 
-                   :src="getItemImagePath(playersState[hoveredPlayer].items.vest)"
-                   @error="(e: any) => e.target.style.display='none'" />
-              <div class="empty-slot">甲</div>
-            </div>
-            <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.backpack]">
-              <img v-if="playersState[hoveredPlayer].items.backpack" 
-                   :src="getItemImagePath(playersState[hoveredPlayer].items.backpack)"
-                   @error="(e: any) => e.target.style.display='none'" />
-              <div class="empty-slot">包</div>
-            </div>
-          </div>
-          <div class="equip-section weapons">
-            <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon1]">
-              <img v-if="playersState[hoveredPlayer].items.weapon1" 
-                   :src="getItemImagePath(playersState[hoveredPlayer].items.weapon1)"
-                   @error="(e: any) => e.target.style.display='none'" />
-              <div class="empty-slot">1</div>
-            </div>
-            <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon2]">
-              <img v-if="playersState[hoveredPlayer].items.weapon2" 
-                   :src="getItemImagePath(playersState[hoveredPlayer].items.weapon2)"
-                   @error="(e: any) => e.target.style.display='none'" />
-              <div class="empty-slot">2</div>
-            </div>
-            <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon3]">
-              <img v-if="playersState[hoveredPlayer].items.weapon3" 
-                   :src="getItemImagePath(playersState[hoveredPlayer].items.weapon3)"
-                   @error="(e: any) => e.target.style.display='none'" />
-              <div class="empty-slot">3</div>
-            </div>
-            <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon4]">
-              <img v-if="playersState[hoveredPlayer].items.weapon4" 
-                   :src="getItemImagePath(playersState[hoveredPlayer].items.weapon4)"
-                   @error="(e: any) => e.target.style.display='none'" />
-              <div class="empty-slot">4</div>
+            <div class="detail-stats">
+              <span class="stat-item highlight" v-if="currentPlayerStats.rank">
+                <el-icon><Aim /></el-icon> 排名: #{{ currentPlayerStats.rank }}
+              </span>
+              <span class="stat-item highlight" v-if="currentPlayerStats.kills !== undefined">
+                <el-icon><Lightning /></el-icon> 击杀: {{ currentPlayerStats.kills }}
+              </span>
+              <span class="stat-item real-date" v-if="match.createdAt">
+                <el-icon><Calendar /></el-icon> {{ match.createdAt }}
+              </span>
             </div>
           </div>
         </div>
-
-        <div class="player-list">
-          <div class="section-title">玩家与战绩统计 ({{ alivePlayers.length }} 存活)</div>
-          <el-scrollbar height="100%">
-            <div v-for="(team, teamId) in groupedPlayers" :key="teamId" :id="`team-${teamId}`" class="team-group">
-              <div class="team-header">
-                <span class="team-id">小队 {{ teamId }}</span>
-                <span class="team-status" :class="{ 'all-dead': team.every(p => !p.isAlive) }">
-                  {{ team.filter(p => p.isAlive).length }}/{{ team.length }} 存活
-                </span>
-              </div>
+        <div class="controls" v-if="!loading">
+          <el-button-group>
+            <el-button :icon="isPlaying ? VideoPause : VideoPlay" @click="togglePlay">
+              {{ isPlaying ? '暂停' : '播放' }}
+            </el-button>
+            <el-button @click="resetPlayback">重置</el-button>
+          </el-button-group>
+          <div class="speed-control">
+            <span>倍速:</span>
+            <el-select v-model="playSpeed" style="width: 80px">
+              <el-option label="1x" :value="1" />
+              <el-option label="2x" :value="2" />
+              <el-option label="5x" :value="5" />
+              <el-option label="10x" :value="10" />
+              <el-option label="20x" :value="20" />
+            </el-select>
+          </div>
+          <div class="time-slider">
+            <div class="time-display">
+              <span class="current">{{ formatTime(currentTime) }}</span>
+              <span class="divider">/</span>
+              <span class="total">{{ formatTime(maxTime) }}</span>
+            </div>
+            <div class="slider-wrapper">
+              <el-slider v-model="currentTime" :max="maxTime" :format-tooltip="formatTime" @input="onSliderChange" />
               <div
-                v-for="player in team"
-                :key="player.name"
-                :id="`player-${player.name}`"
-                class="player-item"
-                :class="{ 'is-dead': !player.isAlive, 'is-focused': focusedPlayer === player.name }"
-                @click="focusPlayer(player.name)"
-                @mouseenter="handleMouseEnter($event, player.name)"
-                @mouseleave="handleMouseLeave"
-              >
-                <div class="player-main">
-                  <div class="player-color" :style="{ backgroundColor: getPlayerColor(player) }"></div>
-                  <div class="player-name">{{ player.name }}</div>
-                  <el-icon class="search-icon" @click.stop="goToPlayer(player.name)" title="在新标签页查看战绩"><ArrowLeft style="transform: rotate(180deg)" v-if="false" /><Aim v-if="false" /><Plus v-if="false" /><Search /></el-icon>
-                  <div class="player-hp" v-if="player.isAlive">
-                    <el-progress :percentage="player.hp" :show-text="false" :stroke-width="4" />
+                v-if="matchStartTime > 0"
+                class="start-marker"
+                :style="{ left: (matchStartTime / maxTime * 100) + '%' }"
+                title="登机时刻"
+              ></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="replay-content">
+        <div class="map-wrapper">
+          <div id="map" class="map-container"></div>
+          
+          <div class="zoom-control" v-if="mapInstance">
+            <el-icon class="zoom-icon" @click="changeZoom(0.5)"><Plus /></el-icon>
+            <el-slider
+              v-model="currentZoom"
+              vertical
+              height="120px"
+              :min="minZoom"
+              :max="4"
+              :step="0.01"
+              :show-tooltip="false"
+              @input="onZoomSliderChange"
+            />
+            <el-icon class="zoom-icon" @click="changeZoom(-0.5)"><Minus /></el-icon>
+          </div>
+        </div>
+
+        <div class="sidebar">
+          <!-- 装备悬浮窗 (全局单例，避免被 scrollbar 裁剪) -->
+          <div v-if="hoveredPlayer && playersState[hoveredPlayer]"
+               class="equipment-popup"
+               :style="{ top: hoveredPlayerTop + 'px' }">
+            <div class="equip-section gear">
+              <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.helmet]">
+                <img v-if="playersState[hoveredPlayer].items.helmet" 
+                     :src="getItemImagePath(playersState[hoveredPlayer].items.helmet)"
+                     @error="(e: any) => e.target.style.display='none'" />
+                <div class="empty-slot">头</div>
+              </div>
+              <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.vest]">
+                <img v-if="playersState[hoveredPlayer].items.vest" 
+                     :src="getItemImagePath(playersState[hoveredPlayer].items.vest)"
+                     @error="(e: any) => e.target.style.display='none'" />
+                <div class="empty-slot">甲</div>
+              </div>
+              <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.backpack]">
+                <img v-if="playersState[hoveredPlayer].items.backpack" 
+                     :src="getItemImagePath(playersState[hoveredPlayer].items.backpack)"
+                     @error="(e: any) => e.target.style.display='none'" />
+                <div class="empty-slot">包</div>
+              </div>
+            </div>
+            <div class="equip-section weapons">
+              <div class="equip-slot weapon" :title="getWeaponTitle(playersState[hoveredPlayer].items.weapon1, hoveredPlayer)">
+                <img v-if="playersState[hoveredPlayer].items.weapon1" 
+                     :src="getItemImagePath(playersState[hoveredPlayer].items.weapon1)"
+                     @error="(e: any) => e.target.style.display='none'" />
+                <div class="empty-slot">1</div>
+              </div>
+              <div class="equip-slot weapon" :title="getWeaponTitle(playersState[hoveredPlayer].items.weapon2, hoveredPlayer)">
+                <img v-if="playersState[hoveredPlayer].items.weapon2" 
+                     :src="getItemImagePath(playersState[hoveredPlayer].items.weapon2)"
+                     @error="(e: any) => e.target.style.display='none'" />
+                <div class="empty-slot">2</div>
+              </div>
+            </div>
+            <!-- 新增：武器名称行 -->
+            <div class="equip-section weapon-names" v-if="playersState[hoveredPlayer].items.weapon1 || playersState[hoveredPlayer].items.weapon2">
+              <div class="weapon-name-tag" v-if="playersState[hoveredPlayer].items.weapon1">
+                {{ getWeaponTitle(playersState[hoveredPlayer].items.weapon1, hoveredPlayer) }}
+              </div>
+              <div class="weapon-name-tag" v-if="playersState[hoveredPlayer].items.weapon2">
+                {{ getWeaponTitle(playersState[hoveredPlayer].items.weapon2, hoveredPlayer) }}
+              </div>
+            </div>
+          </div>
+
+          <div class="player-list">
+            <div class="section-title">玩家与战绩统计 ({{ alivePlayers.length }} 存活)</div>
+            <el-scrollbar height="100%">
+              <div v-for="(team, teamId) in groupedPlayers" :key="teamId" :id="`team-${teamId}`" class="team-group">
+                <div class="team-header">
+                  <span class="team-id">小队 {{ teamId }}</span>
+                  <span class="team-status" :class="{ 'all-dead': team.every(p => !p.isAlive) }">
+                    {{ team.filter(p => p.isAlive).length }}/{{ team.length }} 存活
+                  </span>
+                </div>
+                <div
+                  v-for="player in team"
+                  :key="player.name"
+                  :id="`player-${player.name}`"
+                  class="player-item"
+                  :class="{ 'is-dead': !player.isAlive, 'is-focused': focusedPlayer === player.name }"
+                  @click="focusPlayer(player.name)"
+                  @mouseenter="handleMouseEnter($event, player.name)"
+                  @mouseleave="handleMouseLeave"
+                >
+                  <div class="player-main">
+                    <div class="player-color" :style="{ backgroundColor: getPlayerColor(player) }"></div>
+                    <div class="player-name">
+                      {{ player.name }}
+                      <span v-if="player.isBot" class="bot-tag">BOT</span>
+                    </div>
+                    <el-icon class="search-icon" @click.stop="goToPlayer(player.name)" title="在新标签页查看战绩"><ArrowLeft style="transform: rotate(180deg)" v-if="false" /><Aim v-if="false" /><Plus v-if="false" /><Search /></el-icon>
+                    <div class="player-hp" v-if="player.isAlive">
+                      <el-progress :percentage="player.hp" :show-text="false" :stroke-width="4" />
+                    </div>
+                  </div>
+                  <div class="player-stats-mini">
+                    <span title="击杀"><el-icon><Aim /></el-icon> {{ player.kills }}</span>
+                    <span title="击倒"><el-icon><Warning /></el-icon> {{ player.dbnos }}</span>
+                    <span title="救援"><el-icon><FirstAidKit /></el-icon> {{ player.revives }}</span>
+                    <span title="伤害"><el-icon><Lightning /></el-icon> {{ Math.floor(player.damage) }}</span>
                   </div>
                 </div>
-                <div class="player-stats-mini">
-                  <span title="击杀"><el-icon><Aim /></el-icon> {{ player.kills }}</span>
-                  <span title="击倒"><el-icon><Warning /></el-icon> {{ player.dbnos }}</span>
-                  <span title="救援"><el-icon><FirstAidKit /></el-icon> {{ player.revives }}</span>
-                  <span title="伤害"><el-icon><Lightning /></el-icon> {{ Math.floor(player.damage) }}</span>
-                </div>
               </div>
-            </div>
-          </el-scrollbar>
-        </div>
+            </el-scrollbar>
+          </div>
 
-        <div class="kill-feed">
-          <div class="section-title">战况播报 (点击定位)</div>
-          <el-scrollbar height="150px">
-            <div
-              v-for="(kill, index) in killFeed"
-              :key="index"
-              class="kill-item"
-              :class="{ 'is-groggy': kill.isGroggy, 'is-revive': kill.isRevive, 'is-respawn': kill.isRespawn }"
-              @click="seekToKill(kill.time)"
-            >
-              <span class="time">[{{ getRelativeTime(kill.time) }}]</span>
-              <span class="killer">{{ kill.killer }}</span>
-              <span class="action">{{ kill.action }}</span>
-              <span class="victim">{{ kill.victim }}</span>
-            </div>
-          </el-scrollbar>
+          <div class="kill-feed">
+            <div class="section-title">战况播报 (点击定位)</div>
+            <el-scrollbar height="100%">
+              <div
+                v-for="(kill, index) in killFeed"
+                :key="index"
+                class="kill-item"
+                :class="{ 'is-groggy': kill.isGroggy, 'is-revive': kill.isRevive, 'is-respawn': kill.isRespawn }"
+                @click="seekToKill(kill.time)"
+              >
+                <span class="time">[{{ getRelativeTime(kill.time) }}]</span>
+                <span class="killer">{{ kill.killer }}</span>
+                <span class="action">{{ kill.action }}</span>
+                <span class="victim">{{ kill.victim }}</span>
+              </div>
+            </el-scrollbar>
+          </div>
         </div>
       </div>
     </div>
@@ -174,14 +199,26 @@
 import { ref, onMounted, onUnmounted, computed, nextTick, watch, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getMatchTelemetry, getMatchDetails } from '../api/player'
-import { ArrowLeft, VideoPlay, VideoPause, Aim, Warning, FirstAidKit, Lightning, Plus, Minus, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, VideoPlay, VideoPause, Aim, Warning, FirstAidKit, Lightning, Plus, Minus, Search, Timer, Calendar, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { MAP_NAME_DICT, GAME_MODE_DICT } from '../utils/constants'
+
+const props = defineProps<{
+  id?: string;
+  player?: string;
+  isDialog?: boolean;
+}>()
 
 const route = useRoute()
 const router = useRouter()
-const matchId = route.params.id as string
+const matchId = computed(() => {
+  if (props.id) return props.id
+  if (route.params.id) return route.params.id as string
+  return ''
+})
+const targetPlayer = computed(() => props.player || (route.query.player as string))
 
 const loading = ref(true)
 const match = ref<any>(null)
@@ -232,6 +269,7 @@ const zones = ref({
 const airdrops = ref<any[]>([])
 const flightPath = ref<any[]>([]) // [{x, y}]
 const matchStartTime = ref(0) // 登机时间点（相对秒数）
+const currentPlayerStats = ref({ rank: 0, kills: 0 })
 
 const MAP_SIZES: Record<string, number> = {
   'Erangel_Main': 8192,
@@ -271,6 +309,16 @@ const pubgToLeaflet = (val: number, mapSize: number) => {
 const initMap = () => {
   if (!match.value) return
 
+  // 如果已有地图实例，先移除
+  if (mapInstance) {
+    try {
+      mapInstance.remove()
+    } catch (e) {
+      console.error('Error removing map instance:', e)
+    }
+    mapInstance = null
+  }
+
   const mapName = match.value.mapName
   if (!mapName) {
     console.error('Map name is missing from match details', match.value)
@@ -287,8 +335,9 @@ const initMap = () => {
   mapInstance = L.map('map', {
     crs: L.CRS.Simple,
     preferCanvas: true, 
-    minZoom: -5, // 支持深度缩小
+    minZoom: -5, 
     maxZoom: 4,
+    zoomSnap: 0, // 允许分级缩放，确保完美适配边界
     zoomControl: false,
     attributionControl: false,
     maxBounds: bounds, 
@@ -303,13 +352,25 @@ const initMap = () => {
   // 3. 添加本地图片图层
   L.imageOverlay(`/maps/${mapName}.jpg`, bounds).addTo(mapInstance)
 
-  // 4. 自动缩放并固定最小缩放级别，防止缩小后看到黑边
-  mapInstance.fitBounds(bounds)
-  const calculatedMinZoom = mapInstance.getBoundsZoom(bounds)
-
-  mapInstance.setMinZoom(calculatedMinZoom)
-  minZoom.value = calculatedMinZoom
-  currentZoom.value = calculatedMinZoom
+  // 4. 自动缩放并固定最小缩放级别，确保完美适配
+  // 核心：使用 nextTick 和 setTimeout 确保容器渲染完成后再计算缩放
+  nextTick(() => {
+    setTimeout(() => {
+      if (mapInstance) {
+        mapInstance.invalidateSize()
+        // 强制计算一个能够填满容器的最小缩放
+        const calculatedMinZoom = mapInstance.getBoundsZoom(bounds, true)
+        
+        mapInstance.setMinZoom(calculatedMinZoom)
+        // 使用 setView 直接定位中心和精确缩放，避免 fitBounds 的舍入误差
+        mapInstance.setView([-mapSize / 2, mapSize / 2], calculatedMinZoom, { animate: false })
+        mapInstance.setMaxBounds(bounds)
+        
+        minZoom.value = calculatedMinZoom
+        currentZoom.value = calculatedMinZoom
+      }
+    }, 300) // 增加到 300ms，确保弹窗动画彻底结束
+  })
 
   // 监听地图缩放事件，同步进度条
   mapInstance.on('zoomend', () => {
@@ -332,6 +393,13 @@ const initMap = () => {
 
 const updateMarkers = () => {
   if (!mapInstance || !mapInstance.getContainer()) return
+  
+  // 核心修复：确保地图已经初始化了中心点和缩放级别，否则 Leaflet 在计算 Tooltip 偏移时会抛出 subtract of undefined 错误
+  try {
+    if (!mapInstance.getCenter()) return
+  } catch (e) {
+    return
+  }
 
   // 批量获取当前所有玩家的平滑状态
   const time = currentTime.value
@@ -441,8 +509,12 @@ const updateMarkers = () => {
   if (focusedName && playersData[focusedName] && isFollowing.value) {
     const smoothState = getInterpolatedPlayerState(focusedName, time)
     if (smoothState && mapInstance) {
-      // 使用 {animate: false} 避免与手动交互冲突，并在跟随模式下才执行
-      mapInstance.setView([-(smoothState.y / 100), smoothState.x / 100], mapInstance.getZoom(), { animate: false })
+      // 核心优化：只有在非最小缩放（有平移空间）时才执行视角跟随
+      // 避免在全景模式下因 maxBounds 限制导致的镜头“抖动”
+      const zoom = mapInstance.getZoom()
+      if (zoom > minZoom.value + 0.05) {
+        mapInstance.setView([-(smoothState.y / 100), smoothState.x / 100], zoom, { animate: false })
+      }
     }
   }
 
@@ -593,26 +665,25 @@ const handleMouseLeave = () => {
 const playerColors: Record<string, string> = {}
 const getPlayerColor = (player: any): string => {
   if (!focusedPlayer.value || !playersState.value[focusedPlayer.value]) {
-    return '#ffffff'
+    return player.isBot ? '#666666' : '#ffffff'
   }
 
   const focusedPlayerObj = playersState.value[focusedPlayer.value]
   const focusedTeamId = focusedPlayerObj.teamId
 
-  // 如果玩家没有 teamId 或者与聚焦玩家不是同一队，显示为白色
-  // 排除无效的 teamId (如 0 或未定义) 导致的错误聚合
-  if (!focusedTeamId || focusedTeamId <= 0 || player.teamId !== focusedTeamId) {
-    return '#ffffff'
+  // 如果玩家与聚焦玩家是同一队，不论是不是机器人，都分配队伍颜色
+  if (focusedTeamId && focusedTeamId > 0 && player.teamId === focusedTeamId) {
+    const teamMembers = Object.values(playersState.value)
+      .filter(p => p.teamId === focusedTeamId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    const memberIndex = teamMembers.findIndex(m => m.name === player.name)
+    const teamColors = ['#feca57', '#ff4d4f', '#54a0ff', '#1dd1a1']
+    return teamColors[memberIndex % teamColors.length] || '#ffffff'
   }
 
-  // 为聚焦小队的成员分配颜色 (黄/橙/蓝/绿)
-  const teamMembers = Object.values(playersState.value)
-    .filter(p => p.teamId === focusedTeamId)
-    .sort((a, b) => a.name.localeCompare(b.name))
-
-  const memberIndex = teamMembers.findIndex(m => m.name === player.name)
-  const teamColors = ['#feca57', '#ff4d4f', '#54a0ff', '#1dd1a1']
-  return teamColors[memberIndex % teamColors.length] || '#ffffff'
+  // 非聚焦队伍的：人机显示灰色，真人显示白色
+  return player.isBot ? '#666666' : '#ffffff'
 }
 
 const alivePlayers = computed(() => {
@@ -647,9 +718,28 @@ const formatTime = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+const getWeaponTitle = (weaponId: string, playerName: string) => {
+  if (!weaponId) return '无武器'
+  const normId = getNormalizedItemId(weaponId)
+  return itemNames.value[normId] || WEAPON_NAME_DICT[normId] || normId
+}
+
 const getRelativeTime = (eventTime: number) => {
   const startTime = eventTimestamps[0] || 0
   return formatTime(Math.max(0, (eventTime - startTime) / 1000))
+}
+
+// 新增：统一规范化物品 ID 的工具函数，剥离皮肤后缀用于查表
+const getNormalizedItemId = (itemId: string) => {
+  if (!itemId) return ''
+  // 武器/装备 ID 格式通常为 Item_Weapon_AK47_C 或 Item_Weapon_AK47_Skin_C
+  // 我们取前 4 段来获取基础 ID
+  const parts = itemId.split('_')
+  if (parts.length > 4) {
+    const base = parts.slice(0, 4).join('_')
+    return base.endsWith('_C') ? base : base + '_C'
+  }
+  return itemId
 }
 
 const WEAPON_CATEGORIES: Record<string, string> = {
@@ -662,12 +752,14 @@ const WEAPON_CATEGORIES: Record<string, string> = {
   'Item_Weapon_M1911_C': 'handgun',
   'Item_Weapon_vz61Skorpion_C': 'handgun',
   'Item_Weapon_Rhino_C': 'handgun',
+  'Item_Weapon_M79_C': 'handgun',      // M79 榴弹发射器占手枪位
+  'Item_Weapon_Flaregun_C': 'handgun',  // 信号枪占手枪位
   // Melee
   'Item_Weapon_Cowbar_C': 'melee',
   'Item_Weapon_Pan_C': 'melee',
   'Item_Weapon_Machete_C': 'melee',
   'Item_Weapon_Sickle_C': 'melee',
-  // Throwable
+  // Throwable & Lobby items
   'Item_Weapon_Grenade_C': 'throwable',
   'Item_Weapon_Molotov_C': 'throwable',
   'Item_Weapon_FlashBang_C': 'throwable',
@@ -675,25 +767,19 @@ const WEAPON_CATEGORIES: Record<string, string> = {
   'Item_Weapon_SmokeBomb_C': 'throwable',
   'Item_Weapon_StickyGrenade_C': 'throwable',
   'Item_Weapon_C4_C': 'throwable',
+  'Item_Weapon_Apple_C': 'throwable',     // 苹果（大厅道具）
+  'Item_Weapon_Snowball_C': 'throwable',  // 雪球（大厅道具）
+  'Item_Weapon_SpikeTrap_C': 'throwable',
+  'Item_Weapon_BluezoneGrenade_C': 'throwable'
 }
 
 const getItemImagePath = (itemId: string) => {
   if (!itemId) return ''
 
-  // 1. 核心映射表：解决遥测 ID 与素材文件名完全不一致的顽疾
+  // 1. 核心映射表：解决个别遥测 ID 与素材文件名完全不匹配的情况（如莫辛纳甘）
   const ID_MAPPING: Record<string, string> = {
-    // 狙击与步枪
-    'Item_Weapon_Mosin_C': 'Item_Weapon_MosinNagant_C',
-    'Item_Weapon_Winchester_C': 'Item_Weapon_Win1894_C',
-    'Item_Weapon_Thompson_C': 'Item_Weapon_Thompson_C',
-    'Item_Weapon_HK416_C': 'Item_Weapon_HK416_C',
-    'Item_Weapon_M416_C': 'Item_Weapon_HK416_C',
-    'Item_Weapon_SCAR-L_C': 'Item_Weapon_SCAR-L_C',
-    // 微冲与手枪
-    'Item_Weapon_UMP_C': 'Item_Weapon_UMP_C', 
-    'Item_Weapon_Bizon_C': 'Item_Weapon_BizonPP19_C',
-    'Item_Weapon_UZI_C': 'Item_Weapon_UZI_C',
-    'Item_Weapon_M1911_C': 'Item_Weapon_M1911_C'
+    // 如果以后发现还有 ID 对应不上的，在这里添加映射
+    // '原始ID': '目标素材文件名'
   }
 
   let finalId = ID_MAPPING[itemId] || itemId
@@ -726,14 +812,61 @@ const getItemImagePath = (itemId: string) => {
 }
 
 const fetchData = async () => {
+  if (!matchId.value) {
+    console.error('fetchData called without matchId')
+    return
+  }
   try {
     loading.value = true
+    // 重置状态
+    match.value = null
+    telemetry.value = []
+    rawTelemetry = []
+    playerTimelines = {}
+    airdropData = {}
+    lastProcessedTime = -1
+    currentEventIndex = 0
+    currentTime.value = 0
+    
+    const mId = matchId.value
+    const pName = targetPlayer.value
+    console.log(`Fetching match data - MatchID: ${mId}, Player: ${pName}`)
+    
+    isPlaying.value = false // 加载新数据前强制暂停
+    if (!mId || mId === 'undefined') {
+      throw new Error('未提供有效的 Match ID')
+    }
+
     const [matchData, telemetryData, itemsData] = await Promise.all([
-      getMatchDetails(matchId),
-      getMatchTelemetry(matchId),
-      fetch('/assets/itemId.json').then(res => res.json())
+      getMatchDetails(mId, pName || undefined),
+      getMatchTelemetry(mId),
+      fetch('/assets/itemId.json')
+        .then(res => res.ok ? res.json() : {})
+        .catch(() => ({}))
     ])
+    
+    if (!telemetryData || !Array.isArray(telemetryData)) {
+      throw new Error('遥测数据格式不正确或为空')
+    }
+
     match.value = matchData
+    
+    // 获取当前玩家的汇总数据
+    if (targetPlayer.value && matchData.participants) {
+      const p = matchData.participants.find((it: any) => it.name === targetPlayer.value)
+      if (p) {
+        currentPlayerStats.value = {
+          rank: p.winPlace,
+          kills: p.kills
+        }
+      }
+    } else if (targetPlayer.value) {
+      // 兼容后端直接返回带统计信息的结构（如果后端已升级）
+      currentPlayerStats.value = {
+        rank: matchData.rank || 0,
+        kills: matchData.kills || 0
+      }
+    }
     // 使用 markRaw 彻底断开响应式链，减少数万个对象的内存占用
     rawTelemetry = markRaw(telemetryData)
     telemetry.value = rawTelemetry
@@ -742,10 +875,13 @@ const fetchData = async () => {
     if (rawTelemetry.length > 0) {
       // 预计算所有事件的时间戳
       const startTime = new Date(rawTelemetry[0]._D).getTime()
-      eventTimestamps = rawTelemetry.map(e => new Date(e._D).getTime())
+      eventTimestamps = rawTelemetry.map(e => {
+        const d = new Date(e._D).getTime()
+        return isNaN(d) ? startTime : d // 兜底处理无效时间戳
+      })
 
       const endTime = eventTimestamps[eventTimestamps.length - 1] || startTime
-      maxTime.value = (endTime - startTime) / 1000
+      maxTime.value = Math.max(0, (endTime - startTime) / 1000)
 
       // 预处理位置时间线，用于平滑移动插值
       preprocessTimelines()
@@ -756,7 +892,7 @@ const fetchData = async () => {
       // 寻找正式登机/比赛开始时间点
       const startEvent = rawTelemetry.find(e => e._T === 'LogMatchStart')
       if (startEvent) {
-        matchStartTime.value = (new Date(startEvent._D).getTime() - startTime) / 1000
+        matchStartTime.value = Math.max(0, (new Date(startEvent._D).getTime() - startTime) / 1000)
       }
 
       // 提取航线 (改进共识算法：降低门槛，确保 100% 成功提取且保持高精度)
@@ -812,35 +948,75 @@ const fetchData = async () => {
         const dx = end.x - start.x
         const dy = end.y - start.y
         const mag = Math.sqrt(dx*dx + dy*dy)
-        if (mag > 500) { // 确保有实际位移
-          const extendDist = 2000000
-          const ux = dx / mag
-          const uy = dy / mag
-          flightPath.value = [
-            { x: start.x - ux * extendDist, y: start.y - uy * extendDist },
-            { x: start.x + ux * extendDist, y: start.y + uy * extendDist }
-          ]
+        if (mag > 500) {
+          // 精准边界裁剪逻辑：计算直线与地图矩形边界的交点，确保航线完美贴合边缘
+          const mapName = match.value.mapName
+          const mapSize = MAP_SIZES[mapName] || 8192
+          const limit = mapSize * 100 // PUBG 坐标系上限
+          
+          const tValues: number[] = []
+          // 计算直线 P = start + t * (end - start) 与四条边界的交点参数 t
+          if (Math.abs(dx) > 0.1) {
+            tValues.push((0 - start.x) / dx)
+            tValues.push((limit - start.x) / dx)
+          }
+          if (Math.abs(dy) > 0.1) {
+            tValues.push((0 - start.y) / dy)
+            tValues.push((limit - start.y) / dy)
+          }
+          
+          // 过滤掉不在地图范围内的交点（允许 1% 浮点误差），并排序
+          const margin = limit * 0.01
+          const validTs = tValues
+            .filter(t => {
+              const px = start.x + t * dx
+              const py = start.y + t * dy
+              return px >= -margin && px <= limit + margin && py >= -margin && py <= limit + margin
+            })
+            .sort((a, b) => a - b)
+
+          if (validTs.length >= 2) {
+            // 取最小和最大的 t，即为穿过地图的进入点和离开点
+            const tEntry = validTs[0]!
+            const tExit = validTs[validTs.length - 1]!
+            
+            flightPath.value = [
+              { x: start.x + tEntry * dx, y: start.y + tEntry * dy },
+              { x: start.x + tExit * dx, y: start.y + tExit * dy }
+            ]
+          }
         }
       }
     }
 
+    // 将地图和玩家初始化放入 nextTick，确保 DOM 已渲染且不阻塞主线程
+    await nextTick()
+    
     initMap()
     initPlayers()
 
     // 仅侧边栏高亮并自动滚动定位，不操作地图视角
-    const targetPlayer = route.query.player as string
-    if (targetPlayer && playersState.value[targetPlayer]) {
-      focusedPlayer.value = targetPlayer
-      scrollToPlayer(targetPlayer)
+    if (targetPlayer.value && playersState.value[targetPlayer.value]) {
+      focusedPlayer.value = targetPlayer.value
+      scrollToPlayer(targetPlayer.value)
     }
 
+    // 数据加载完成后，自动跳转到比赛开始时刻
+    if (matchStartTime.value > 0) {
+      currentTime.value = matchStartTime.value
+      updateState(currentTime.value)
+      updateMarkers()
+    }
+    
+    // 强制触发一次 UI 状态更新，确保统计数据立即显示
+    playersState.value = { ...playersData }
+  } catch (err: any) {
+    console.error('Fetch data error details:', err)
+    const errMsg = err.response?.data?.message || err.message || '数据解析错误'
+    ElMessage.error(`回放加载失败: ${errMsg}`)
+  } finally {
     loading.value = false
-    isPlaying.value = true // 数据加载完成后自动开始播放
-    playbackTimer = requestAnimationFrame(playbackLoop)
-  } catch (err) {
-    console.error(err)
-    ElMessage.error('获取遥测数据失败')
-    loading.value = false
+    console.log('fetchData finished, loading set to false')
   }
 }
 
@@ -967,10 +1143,13 @@ const initPlayers = () => {
     if (event._T === 'LogPlayerPosition') {
       const name = event.character.name
       const accountId = event.character.accountId
-      if (!accountId || accountId === "" || accountId.startsWith('ai.')) return
+      if (!accountId || accountId === "") return
+      const isBot = accountId.startsWith('ai.')
       if (!playersData[name]) {
         playersData[name] = {
           name,
+          accountId,
+          isBot,
           x: event.character.location.x,
           y: event.character.location.y,
           hp: event.character.health,
@@ -1096,18 +1275,34 @@ const updateState = (time: number) => {
             else if (itemP.items.weapon3 === id) itemP.items.weapon3 = ''
             else if (itemP.items.weapon4 === id) itemP.items.weapon4 = ''
           } else {
+            // Pickup / Equip
             if (id.startsWith('Item_Head')) itemP.items.helmet = id
             else if (id.startsWith('Item_Armor')) itemP.items.vest = id
             else if (id.startsWith('Item_Back')) itemP.items.backpack = id
             else if (id.startsWith('Item_Weapon')) {
-              const cat = WEAPON_CATEGORIES[id] || 'main'
-              if (cat === 'handgun') itemP.items.weapon3 = id
-              else if (cat === 'melee' || cat === 'throwable') itemP.items.weapon4 = id
-              else {
-                if (itemP.items.weapon1 !== id && itemP.items.weapon2 !== id) {
-                  if (!itemP.items.weapon1) itemP.items.weapon1 = id
-                  else itemP.items.weapon2 = id
+              const normId = getNormalizedItemId(id)
+              const cat = WEAPON_CATEGORIES[normId] || 'main'
+              
+              if (cat === 'handgun') {
+                itemP.items.weapon3 = id
+              } else if (cat === 'melee' || cat === 'throwable') {
+                itemP.items.weapon4 = id
+              } else {
+                // 主武器槽位 (1 & 2) 严谨填充逻辑
+                // 1. 如果该 ID 已经在任意一个槽位了，跳过（防止 Pickup/Equip 重复触发）
+                if (itemP.items.weapon1 === id || itemP.items.weapon2 === id) {
+                   // 已经在身上了，不处理
+                } else if (!itemP.items.weapon1) {
+                  itemP.items.weapon1 = id
+                } else {
+                  // 槽位 1 满了，填入槽位 2
+                  itemP.items.weapon2 = id
                 }
+              }
+              
+              // Debug 日志：过滤掉干扰道具，仅打印核心武器
+              if (cat === 'main' && (itemP.name === hoveredPlayer.value || itemP.name === focusedPlayer.value)) {
+                console.log(`[Weapon Debug] ${itemP.name} 核心武器变动: ${id} -> 槽位1: ${itemP.items.weapon1}, 槽位2: ${itemP.items.weapon2}`)
               }
             }
           }
@@ -1125,25 +1320,32 @@ const updateState = (time: number) => {
   }
 }
 
-const playbackLoop = (now: number) => {
+function playbackLoop(now: number) {
   if (!lastFrameTime) lastFrameTime = now
-  const deltaTime = (now - lastFrameTime) / 1000
+  const deltaTime = Math.min(0.1, (now - lastFrameTime) / 1000)
   lastFrameTime = now
 
-  if (isPlaying.value) {
-    currentTime.value += deltaTime * playSpeed.value
-    if (currentTime.value >= maxTime.value) {
-      currentTime.value = maxTime.value
-      isPlaying.value = false
+  if (isPlaying.value && maxTime.value > 0) {
+    try {
+      currentTime.value += deltaTime * playSpeed.value
+      if (currentTime.value >= maxTime.value) {
+        currentTime.value = maxTime.value
+        isPlaying.value = false
+      }
+      updateState(currentTime.value)
+      updateMarkers()
+    } catch (e) {
+      console.error('Playback loop error:', e)
+      isPlaying.value = false 
     }
-    updateState(currentTime.value)
-    updateMarkers()
   }
 
   playbackTimer = requestAnimationFrame(playbackLoop)
 }
 
-const togglePlay = () => { isPlaying.value = !isPlaying.value }
+const togglePlay = () => { 
+  isPlaying.value = !isPlaying.value 
+}
 const resetPlayback = () => { isPlaying.value = false; currentTime.value = 0; initPlayers(); }
 const onSliderChange = (val: number) => { currentTime.value = val; updateState(val); updateMarkers(); }
 const seekToKill = (eventTime: number) => {
@@ -1179,9 +1381,14 @@ const formatWeaponName = (name: string) => WEAPON_NAME_DICT[name] || name.replac
 
 const focusPlayer = (name: string) => {
   focusedPlayer.value = name
-  isFollowing.value = true // 重新点选玩家时，恢复视角锁定
+  isFollowing.value = true 
   const p = playersData[name]
-  if (p && mapInstance) mapInstance.panTo([-(p.y / 100), p.x / 100], { animate: true })
+  if (p && mapInstance) {
+    // 核心优化：如果当前是全景模式，点击聚焦时自动放大一级，以便开启视角跟踪
+    const targetZoom = Math.max(mapInstance.getZoom(), minZoom.value + 1)
+    mapInstance.setView([-(p.y / 100), p.x / 100], targetZoom, { animate: true })
+    currentZoom.value = targetZoom
+  }
 }
 
 const scrollToPlayer = (name: string) => {
@@ -1194,11 +1401,69 @@ const scrollToPlayer = (name: string) => {
   })
 }
 
-const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') router.back() }
-watch([focusedPlayer, hoveredPlayer], () => { if (!isPlaying.value) updateMarkers() })
+const handleEsc = (e: KeyboardEvent) => { 
+  if (e.key === 'Escape') {
+    if (props.isDialog) {
+      // 弹窗模式下由父组件处理关闭
+    } else {
+      router.back()
+    }
+  }
+}
+const copyShareLink = () => {
+  const url = `${window.location.origin}/replay/${matchId.value}${targetPlayer.value ? '?player=' + targetPlayer.value : ''}`
+  navigator.clipboard.writeText(url).then(() => {
+    ElMessage.success('链接已复制到剪贴板，快去分享吧！')
+  }).catch(() => {
+    ElMessage.error('复制失败，请手动复制浏览器地址栏链接')
+  })
+}
+
 const goToPlayer = (name: string) => { window.open(router.resolve(`/player/${name}`).href, '_blank') }
 
-onMounted(() => { fetchData(); window.addEventListener('keydown', handleEsc); })
+// 监听加载状态，加载完成后自动播放
+watch(loading, (newLoading) => {
+  if (!newLoading && telemetry.value.length > 0) {
+    console.log('Replay data loaded, preparing auto-play...')
+    
+    // 给予 500ms 缓冲，确保地图图层、弹窗动画、以及 initMap 中的 setView 都稳定了再启动
+    setTimeout(() => {
+      // 1. 自动跳转到比赛开始时刻 (起飞)
+      if (matchStartTime.value > 0) {
+        currentTime.value = matchStartTime.value
+      }
+      
+      // 同步一次状态，此时 updateMarkers 内部已经有了 getCenter 检查，是安全的
+      updateState(currentTime.value)
+      updateMarkers()
+
+      lastFrameTime = 0 
+      isPlaying.value = true
+      console.log('Replay auto-play engaged')
+    }, 500)
+  }
+}, { immediate: false })
+
+// 监听 matchId 变化自动加载数据
+watch(matchId, (newId) => {
+  if (newId) {
+    fetchData()
+  }
+}, { immediate: true })
+
+onMounted(() => {
+  window.addEventListener('keydown', handleEsc)
+  
+  // 统一在组件挂载时启动播放循环管家，它会根据 isPlaying 状态决定是否推进时间
+  if (playbackTimer) cancelAnimationFrame(playbackTimer)
+  lastFrameTime = 0
+  playbackTimer = requestAnimationFrame(playbackLoop)
+
+  // 兜底：如果数据已加载但未播放（常见于缓存或快速渲染场景）
+  if (!loading.value && telemetry.value.length > 0) {
+    isPlaying.value = true
+  }
+})
 onUnmounted(() => {
   window.removeEventListener('keydown', handleEsc)
   if (playbackTimer) cancelAnimationFrame(playbackTimer)
@@ -1337,29 +1602,143 @@ onUnmounted(() => {
       display: none;
     }
   }
+  &.is-dialog {
+    height: 94vh;
+    background-color: transparent; // 弹窗模式背景透明，依靠内部布局背景
+  }
+  
   height: 100vh;
+  width: 100%;
   display: flex;
-  flex-direction: column;
+  justify-content: center; // 关键：水平居中内部布局
+  align-items: center;
   background-color: #1a1a1a;
   color: white;
 }
 
+.replay-layout {
+  height: fit-content; // 核心：高度由内容决定，不再强行撑开
+  max-height: 94vh;
+  width: fit-content;
+  display: flex;
+  flex-direction: column;
+  background-color: #1a1a1a;
+  box-shadow: 0 0 30px rgba(0,0,0,0.7);
+  overflow: hidden;
+}
+
 .replay-header {
-  height: 60px;
+  height: 70px;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
-  background-color: #2a2a2a;
+  padding: 0 24px;
+  background-color: #1e1e1e;
   border-bottom: 1px solid #333;
   z-index: 1001;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+
+  .replay-container.is-dialog & {
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+  }
 
   .left {
     display: flex;
     align-items: center;
-    gap: 15px;
-    .title {
-      font-weight: bold;
+    gap: 18px;
+    min-width: 400px; // 稍微减小，防止撑爆
+
+    .el-button.is-circle {
+      flex-shrink: 0;
+    }
+
+      .match-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+
+        .title-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+
+          .title {
+            font-weight: 600;
+            font-size: 15px;
+            color: #eee;
+            letter-spacing: 0.5px;
+          }
+
+          .share-icon {
+            cursor: pointer;
+            color: #409eff;
+            font-size: 14px;
+            transition: transform 0.2s, color 0.2s;
+            display: flex;
+            align-items: center;
+            
+            &:hover {
+              transform: scale(1.2);
+              color: #66b1ff;
+            }
+            
+            &:active {
+              transform: scale(0.9);
+            }
+          }
+        }
+
+        .detail-stats {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 11px;
+        color: #888;
+
+        .stat-item {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 2px 10px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          border-radius: 12px; // 胶囊样式更现代
+
+          &.replay-time {
+            color: #409eff;
+            background: rgba(64, 158, 255, 0.08);
+            border-color: rgba(64, 158, 255, 0.2);
+            .time-val {
+              font-family: 'Roboto Mono', monospace;
+              font-weight: bold;
+              font-size: 12px;
+            }
+            .time-divider { margin: 0 1px; opacity: 0.4; }
+            .time-total { opacity: 0.6; }
+          }
+
+          &.highlight {
+            color: #ffcc00; // PUBG 经典的黄色
+            background: rgba(255, 204, 0, 0.08);
+            border-color: rgba(255, 204, 0, 0.3);
+            font-weight: bold;
+          }
+
+          &.real-date {
+            font-size: 10px;
+            border: none;
+            background: transparent;
+            padding: 0;
+            opacity: 0.5;
+          }
+
+          .el-icon {
+            font-size: 14px;
+          }
+        }
+      }
     }
   }
 
@@ -1367,33 +1746,45 @@ onUnmounted(() => {
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 20px;
-    margin-left: 40px;
+    gap: 24px;
+    padding: 0 40px;
+    max-width: 800px; // 限制进度条区域最大宽度
 
     .time-slider {
       flex: 1;
       display: flex;
-      align-items: center;
-      gap: 15px;
-      font-size: 13px;
-      color: #999;
+      flex-direction: column; // 改为上下结构，时间在滑块上方
+      gap: 2px;
+            
+      .time-display {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Roboto Mono', monospace;
+        font-size: 11px;
+        color: #888;
+        .current { color: #409eff; font-weight: bold; }
+        .divider { margin: 0 4px; opacity: 0.5; }
+      }
+    
       .slider-wrapper {
         flex: 1;
         position: relative;
-        display: flex;
-        align-items: center;
+        padding: 0 10px;
         .el-slider {
-          flex: 1;
+          height: 24px; // 稍微调细
         }
         .start-marker {
           position: absolute;
           top: 50%;
           transform: translateY(-50%);
-          width: 2px;
-          height: 12px;
+          width: 3px;
+          height: 14px;
           background-color: #f56c6c;
+          border-radius: 1px;
           z-index: 10;
           pointer-events: none;
+          box-shadow: 0 0 4px rgba(245, 108, 108, 0.5);
         }
       }
     }
@@ -1401,22 +1792,40 @@ onUnmounted(() => {
     .speed-control {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 13px;
+      gap: 10px;
+      font-size: 12px;
+      color: #999;
+      white-space: nowrap;
+        
+      :deep(.el-input__inner) {
+        background: rgba(0,0,0,0.2);
+        border-color: #444;
+        color: #ccc;
+        height: 28px;
+      }
     }
   }
 }
 
 .replay-content {
-  flex: 1;
   display: flex;
   overflow: hidden;
+  background-color: #000;
+  // 高度由地图决定
+  height: calc(min(1024px, 94vh - 70px)); 
 }
 
 .map-wrapper {
-  flex: 1;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  width: auto; // 宽度由比例自动决定
   position: relative;
   overflow: hidden;
+  background-color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0; 
 }
 
 .map-container {
@@ -1463,23 +1872,25 @@ onUnmounted(() => {
 }
 
 .sidebar {
-  width: 300px;
+  width: 350px;
+  height: 100%; // 严格等于 replay-content 高度（即地图高度）
   display: flex;
   flex-direction: column;
-  background-color: #222;
+  background-color: #1a1a1a;
   border-left: 1px solid #333;
   z-index: 1000;
 
   .player-list {
-    flex: 1;
+    flex: 6; // 占 6 份高度
     overflow: hidden;
-    padding: 30px 15px 10px 15px; // 进一步增加顶部间距
+    padding: 15px; 
   }
 
   .kill-feed {
-    height: 200px;
+    flex: 4; // 占 4 份高度，确保整体不溢出
     border-top: 1px solid #333;
-    padding: 10px;
+    padding: 15px;
+    overflow: hidden;
   }
 
   .section-title {
@@ -1487,6 +1898,7 @@ onUnmounted(() => {
     font-weight: bold;
     color: #409eff;
     margin-bottom: 10px;
+    flex-shrink: 0;
   }
 }
 
@@ -1535,6 +1947,20 @@ onUnmounted(() => {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    .bot-tag {
+      font-size: 10px;
+      padding: 0 4px;
+      background: #555;
+      color: #aaa;
+      border-radius: 2px;
+      font-weight: bold;
+      transform: scale(0.85);
+      flex-shrink: 0;
+    }
   }
 
   .search-icon {
@@ -1626,6 +2052,26 @@ onUnmounted(() => {
       height: 35px;
     }
   }
+
+  .weapon-names {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+
+    .weapon-name-tag {
+      font-size: 10px;
+      color: #eee;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 1px 6px;
+      border-radius: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+    }
+  }
 }
 
 .team-group {
@@ -1659,32 +2105,35 @@ onUnmounted(() => {
 }
 
 .kill-item {
-  font-size: 12px;
-  margin-bottom: 5px;
-  padding: 4px 8px;
+  font-size: 11px;
+  margin-bottom: 2px;
+  padding: 3px 6px;
   cursor: pointer;
   border-radius: 4px;
-  transition: background-color 0.2s;
-
-  &:hover {
-    background-color: rgba(64, 158, 255, 0.15);
-  }
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
 
   .time {
-    color: #666;
-    margin-right: 8px;
-    font-family: monospace;
+    color: #aaa;
+    margin-right: 6px;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 10px;
+    flex-shrink: 0;
   }
 
-  .killer { color: #67c23a; font-weight: bold; } // 击杀者显示为绿色
-  .victim { color: #999; }
-  .action { margin: 0 5px; color: #666; }
+  .killer { color: #67c23a; font-weight: bold; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; } 
+  .victim { color: #eee; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+  .action { margin: 0 4px; color: #888; flex-shrink: 0; }
+  
   &.is-groggy {
-    .action { color: #e6a23c; } // 击倒显示为黄色
+    .action { color: #e6a23c; } 
   }
 
   &.is-revive {
-    .action { color: #67c23a; } // 扶起/复活显示为绿色（正面反馈）
+    .action { color: #67c23a; } 
   }
 
   &.is-respawn {
