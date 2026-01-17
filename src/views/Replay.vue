@@ -49,12 +49,23 @@
             </div>
             <div class="slider-wrapper">
               <el-slider v-model="currentTime" :max="maxTime" :format-tooltip="formatTime" @input="onSliderChange" />
+              <!-- 起飞标记 -->
               <div
                 v-if="matchStartTime > 0"
                 class="start-marker"
                 :style="{ left: (matchStartTime / maxTime * 100) + '%' }"
                 title="登机时刻"
               ></div>
+              <!-- 玩家事件标记 -->
+              <template v-for="(evt, idx) in playerEvents" :key="idx">
+                <el-tooltip :content="evt.label" placement="top">
+                  <div 
+                    class="event-marker" 
+                    :class="evt.type"
+                    :style="{ left: (evt.time / maxTime * 100) + '%', backgroundColor: evt.color }"
+                  ></div>
+                </el-tooltip>
+              </template>
             </div>
           </div>
         </div>
@@ -63,6 +74,18 @@
       <div class="replay-content">
         <div class="map-wrapper">
           <div id="map" class="map-container"></div>
+          
+          <!-- 实时存活统计遮罩 -->
+          <div class="match-stats-overlay" v-if="!loading">
+            <div class="stat-item">
+              <span class="label">TEAMS</span>
+              <span class="value">{{ aliveTeamsCount }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">ALIVE</span>
+              <span class="value">{{ alivePlayers.length }}</span>
+            </div>
+          </div>
           
           <div class="zoom-control" v-if="mapInstance">
             <el-icon class="zoom-icon" @click="changeZoom(0.5)"><Plus /></el-icon>
@@ -183,9 +206,15 @@
                 @click="seekToKill(kill.time)"
               >
                 <span class="time">[{{ getRelativeTime(kill.time) }}]</span>
-                <span class="killer">{{ kill.killer }}</span>
+                <span class="killer">
+                  <span v-if="kill.killerTeamId" class="team-no">#{{ kill.killerTeamId }}</span>
+                  {{ kill.killer }}
+                </span>
                 <span class="action">{{ kill.action }}</span>
-                <span class="victim">{{ kill.victim }}</span>
+                <span class="victim" v-if="kill.victim">
+                  <span v-if="kill.victimTeamId" class="team-no">#{{ kill.victimTeamId }}</span>
+                  {{ kill.victim }}
+                </span>
               </div>
             </el-scrollbar>
           </div>
@@ -270,6 +299,37 @@ const airdrops = ref<any[]>([])
 const flightPath = ref<any[]>([]) // [{x, y}]
 const matchStartTime = ref(0) // 登机时间点（相对秒数）
 const currentPlayerStats = ref({ rank: 0, kills: 0 })
+
+// 计算当前玩家的关键对局事件，用于在进度条展示
+const playerEvents = computed(() => {
+  if (!targetPlayer.value || !rawTelemetry || rawTelemetry.length === 0) return []
+  
+  const startTime = new Date(rawTelemetry[0]._D).getTime()
+  const events: any[] = []
+  
+  rawTelemetry.forEach((event, idx) => {
+    const time = (new Date(event._D).getTime() - startTime) / 1000
+    
+    // 击杀/淘汰
+    if (event._T === 'LogPlayerKillV2') {
+      if (event.killer?.name === targetPlayer.value) {
+        events.push({ time, type: 'kill', label: `淘汰了 ${event.victim?.name}`, color: '#67c23a' })
+      } else if (event.victim?.name === targetPlayer.value) {
+        events.push({ time, type: 'death', label: `被 ${event.killer?.name || 'Suicide'} 淘汰`, color: '#f56c6c' })
+      }
+    }
+    // 击倒
+    else if (event._T === 'LogPlayerMakeGroggy') {
+      if (event.attacker?.name === targetPlayer.value) {
+        events.push({ time, type: 'groggy', label: `击倒了 ${event.victim?.name}`, color: '#e6a23c' })
+      } else if (event.victim?.name === targetPlayer.value) {
+        events.push({ time, type: 'downed', label: `被 ${event.attacker?.name || 'Unknown'} 击倒`, color: '#f56c6c' })
+      }
+    }
+  })
+  
+  return events
+})
 
 const MAP_SIZES: Record<string, number> = {
   'Erangel_Main': 8192,
@@ -688,6 +748,16 @@ const getPlayerColor = (player: any): string => {
 
 const alivePlayers = computed(() => {
   return Object.values(playersState.value).filter(p => p.isAlive)
+})
+
+const aliveTeamsCount = computed(() => {
+  const aliveTeams = new Set<number>()
+  Object.values(playersState.value).forEach(p => {
+    if (p.isAlive) {
+      aliveTeams.add(p.teamId)
+    }
+  })
+  return aliveTeams.size
 })
 
 const groupedPlayers = computed(() => {
@@ -1202,7 +1272,14 @@ const updateState = (time: number) => {
           if (!p.isAlive && (event.character.location.z > 10000 || p.hp > 0)) {
             p.isAlive = true
             if (event.character.location.z > 10000) {
-              killFeed.value.unshift({ killer: p.name, victim: '', action: '重新进入了战场', isRespawn: true, time: eventTime })
+              killFeed.value.unshift({ 
+                killer: p.name, 
+                killerTeamId: p.teamId,
+                victim: '', 
+                action: '重新进入了战场', 
+                isRespawn: true, 
+                time: eventTime 
+              })
             }
           }
         }
@@ -1224,7 +1301,16 @@ const updateState = (time: number) => {
         const killerG = event.attacker ? playersData[event.attacker.name] : null
         if (killerG) killerG.dbnos++
         if (event.victim) {
-          killFeed.value.unshift({ killer: event.attacker?.name || 'Unknown', victim: event.victim.name, action: '击倒了', isGroggy: true, time: eventTime })
+          const victimG = playersData[event.victim.name]
+          killFeed.value.unshift({ 
+            killer: event.attacker?.name || 'Unknown', 
+            killerTeamId: killerG?.teamId,
+            victim: event.victim.name, 
+            victimTeamId: victimG?.teamId,
+            action: '击倒了', 
+            isGroggy: true, 
+            time: eventTime 
+          })
         }
         break
       case 'LogPlayerRevive':
@@ -1233,7 +1319,15 @@ const updateState = (time: number) => {
         const victimR = event.victim ? playersData[event.victim.name] : null
         if (victimR) {
           victimR.isAlive = true; victimR.hp = event.victim.health || 20
-          killFeed.value.unshift({ killer: event.reviver?.name || 'Unknown', victim: event.victim.name, action: '扶起了', isRevive: true, time: eventTime })
+          killFeed.value.unshift({ 
+            killer: event.reviver?.name || 'Unknown', 
+            killerTeamId: reviver?.teamId,
+            victim: event.victim.name, 
+            victimTeamId: victimR?.teamId,
+            action: '扶起了', 
+            isRevive: true, 
+            time: eventTime 
+          })
         }
         break
       case 'LogPlayerKillV2':
@@ -1242,7 +1336,14 @@ const updateState = (time: number) => {
         const victimK = event.victim ? playersData[event.victim.name] : null
         if (victimK) {
           victimK.isAlive = false; victimK.hp = 0
-          killFeed.value.unshift({ killer: event.killer?.name || 'Suicide', victim: event.victim.name, action: '淘汰了', time: eventTime })
+          killFeed.value.unshift({ 
+            killer: event.killer?.name || 'Suicide', 
+            killerTeamId: killerK?.teamId,
+            victim: event.victim.name, 
+            victimTeamId: victimK?.teamId,
+            action: '淘汰了', 
+            time: eventTime 
+          })
         }
         break
       case 'LogGameStatePeriodic':
@@ -1786,6 +1887,29 @@ onUnmounted(() => {
           pointer-events: none;
           box-shadow: 0 0 4px rgba(245, 108, 108, 0.5);
         }
+
+        .event-marker {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          z-index: 11;
+          cursor: pointer;
+          border: 1px solid rgba(255, 255, 255, 0.5);
+          box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+          transition: transform 0.2s;
+
+          &:hover {
+            transform: translateY(-50%) scale(1.5);
+            z-index: 12;
+          }
+
+          &.kill { border-color: #fff; }
+          &.death { width: 8px; height: 8px; border-radius: 2px; transform: translateY(-50%) rotate(45deg); }
+          &.death:hover { transform: translateY(-50%) rotate(45deg) scale(1.5); }
+        }
       }
     }
 
@@ -1826,6 +1950,41 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0; 
+}
+
+.match-stats-overlay {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  z-index: 1001;
+  display: flex;
+  gap: 15px;
+  background-color: rgba(0, 0, 0, 0.4);
+  padding: 4px 16px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(4px);
+  pointer-events: none; // 防止遮挡地图点击
+
+  .stat-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    .label {
+      font-size: 13px;
+      color: #999;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+
+    .value {
+      font-size: 20px;
+      color: #fff;
+      font-weight: 800;
+      font-family: 'Roboto Mono', monospace;
+    }
+  }
 }
 
 .map-container {
@@ -2127,6 +2286,14 @@ onUnmounted(() => {
   .killer { color: #67c23a; font-weight: bold; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; } 
   .victim { color: #eee; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
   .action { margin: 0 4px; color: #888; flex-shrink: 0; }
+
+  .team-no {
+    color: #999;
+    font-size: 10px;
+    margin-right: 4px;
+    font-style: italic;
+    opacity: 0.8;
+  }
   
   &.is-groggy {
     .action { color: #e6a23c; } 
