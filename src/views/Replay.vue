@@ -759,27 +759,63 @@ const fetchData = async () => {
         matchStartTime.value = (new Date(startEvent._D).getTime() - startTime) / 1000
       }
 
-      // 提取航线
-      const planePoints: any[] = []
-      rawTelemetry.forEach(e => {
+      // 提取航线 (改进共识算法：降低门槛，确保 100% 成功提取且保持高精度)
+      const timeGroupedPoints: Record<number, {x: number, y: number}[]> = {}
+      const firstTs = eventTimestamps[0] || 0
+      
+      rawTelemetry.forEach((e, idx) => {
         if (e._T === 'LogPlayerPosition' && e.character.location.z > 10000) {
-             planePoints.push({ x: e.character.location.x, y: e.character.location.y })
+          const ts = eventTimestamps[idx]
+          if (ts === undefined) return
+          const elapsed = (ts - firstTs) / 1000
+          // 采集开局前 5 分钟内的高空数据
+          if (elapsed < 300) {
+            // 将时间戳归一化到 500ms 窗口，增加共识概率
+            const timeKey = Math.floor(ts / 500) * 500
+            if (!timeGroupedPoints[timeKey]) timeGroupedPoints[timeKey] = []
+            timeGroupedPoints[timeKey].push({ x: e.character.location.x, y: e.character.location.y })
+          }
         }
       })
 
-      if (planePoints.length > 5) {
-        const start = planePoints[0]
-        const end = planePoints[planePoints.length - 1]
+      const consensusPoints: {x: number, y: number, t: number}[] = []
+      Object.entries(timeGroupedPoints).forEach(([tsStr, pts]) => {
+        const ts = Number(tsStr)
+        const counts: Record<string, number> = {}
+        pts.forEach(p => {
+          // 聚合精度：取整到 10 像素，处理极微小的坐标同步误差
+          const key = `${Math.floor(p.x / 10) * 10},${Math.floor(p.y / 10) * 10}`
+          counts[key] = (counts[key] || 0) + 1
+        })
+        
+        let maxCount = 0
+        let bestPos = { x: 0, y: 0 }
+        for (const key in counts) {
+          const count = counts[key] || 0
+          if (count > maxCount) {
+            maxCount = count
+            const parts = key.split(',')
+            bestPos = { x: Number(parts[0]) || 0, y: Number(parts[1]) || 0 }
+          }
+        }
+        
+        // 阈值下调：只要有 2 人坐标一致即认定为飞机，确保即便在人少的对局也能提取航线
+        if (maxCount >= 2) {
+          consensusPoints.push({ ...bestPos, t: ts })
+        }
+      })
+
+      if (consensusPoints.length >= 2) {
+        consensusPoints.sort((a, b) => a.t - b.t)
+        const start = consensusPoints[0]!
+        const end = consensusPoints[consensusPoints.length - 1]!
         const dx = end.x - start.x
         const dy = end.y - start.y
         const mag = Math.sqrt(dx*dx + dy*dy)
-
-        if (mag > 0) {
-          // 计算飞行向量，并将航线延长到足够远（200万单位），确保贯穿地图
+        if (mag > 500) { // 确保有实际位移
           const extendDist = 2000000
           const ux = dx / mag
           const uy = dy / mag
-
           flightPath.value = [
             { x: start.x - ux * extendDist, y: start.y - uy * extendDist },
             { x: start.x + ux * extendDist, y: start.y + uy * extendDist }
