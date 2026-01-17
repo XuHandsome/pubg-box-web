@@ -63,34 +63,48 @@
              :style="{ top: hoveredPlayerTop + 'px' }">
           <div class="equip-section gear">
             <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.helmet]">
-              <img v-if="playersState[hoveredPlayer].items.helmet" :src="getItemImagePath(playersState[hoveredPlayer].items.helmet)" />
-              <div v-else class="empty-slot">头</div>
+              <img v-if="playersState[hoveredPlayer].items.helmet" 
+                   :src="getItemImagePath(playersState[hoveredPlayer].items.helmet)"
+                   @error="(e: any) => e.target.style.display='none'" />
+              <div class="empty-slot">头</div>
             </div>
             <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.vest]">
-              <img v-if="playersState[hoveredPlayer].items.vest" :src="getItemImagePath(playersState[hoveredPlayer].items.vest)" />
-              <div v-else class="empty-slot">甲</div>
+              <img v-if="playersState[hoveredPlayer].items.vest" 
+                   :src="getItemImagePath(playersState[hoveredPlayer].items.vest)"
+                   @error="(e: any) => e.target.style.display='none'" />
+              <div class="empty-slot">甲</div>
             </div>
             <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.backpack]">
-              <img v-if="playersState[hoveredPlayer].items.backpack" :src="getItemImagePath(playersState[hoveredPlayer].items.backpack)" />
-              <div v-else class="empty-slot">包</div>
+              <img v-if="playersState[hoveredPlayer].items.backpack" 
+                   :src="getItemImagePath(playersState[hoveredPlayer].items.backpack)"
+                   @error="(e: any) => e.target.style.display='none'" />
+              <div class="empty-slot">包</div>
             </div>
           </div>
           <div class="equip-section weapons">
             <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon1]">
-              <img v-if="playersState[hoveredPlayer].items.weapon1" :src="getItemImagePath(playersState[hoveredPlayer].items.weapon1)" />
-              <div v-else class="empty-slot">1</div>
+              <img v-if="playersState[hoveredPlayer].items.weapon1" 
+                   :src="getItemImagePath(playersState[hoveredPlayer].items.weapon1)"
+                   @error="(e: any) => e.target.style.display='none'" />
+              <div class="empty-slot">1</div>
             </div>
             <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon2]">
-              <img v-if="playersState[hoveredPlayer].items.weapon2" :src="getItemImagePath(playersState[hoveredPlayer].items.weapon2)" />
-              <div v-else class="empty-slot">2</div>
+              <img v-if="playersState[hoveredPlayer].items.weapon2" 
+                   :src="getItemImagePath(playersState[hoveredPlayer].items.weapon2)"
+                   @error="(e: any) => e.target.style.display='none'" />
+              <div class="empty-slot">2</div>
             </div>
             <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon3]">
-              <img v-if="playersState[hoveredPlayer].items.weapon3" :src="getItemImagePath(playersState[hoveredPlayer].items.weapon3)" />
-              <div v-else class="empty-slot">3</div>
+              <img v-if="playersState[hoveredPlayer].items.weapon3" 
+                   :src="getItemImagePath(playersState[hoveredPlayer].items.weapon3)"
+                   @error="(e: any) => e.target.style.display='none'" />
+              <div class="empty-slot">3</div>
             </div>
             <div class="equip-slot weapon" :title="itemNames[playersState[hoveredPlayer].items.weapon4]">
-              <img v-if="playersState[hoveredPlayer].items.weapon4" :src="getItemImagePath(playersState[hoveredPlayer].items.weapon4)" />
-              <div v-else class="empty-slot">4</div>
+              <img v-if="playersState[hoveredPlayer].items.weapon4" 
+                   :src="getItemImagePath(playersState[hoveredPlayer].items.weapon4)"
+                   @error="(e: any) => e.target.style.display='none'" />
+              <div class="empty-slot">4</div>
             </div>
           </div>
         </div>
@@ -157,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getMatchTelemetry, getMatchDetails } from '../api/player'
 import { ArrowLeft, VideoPlay, VideoPause, Aim, Warning, FirstAidKit, Lightning, Plus, Minus, Search } from '@element-plus/icons-vue'
@@ -172,9 +186,14 @@ const matchId = route.params.id as string
 const loading = ref(true)
 const match = ref<any>(null)
 const telemetry = ref<any[]>([])
+// 非响应式存储，避免深度代理导致的巨额内存开销
+let rawTelemetry: any[] = []
+let playerTimelines: Record<string, any[]> = {} 
+let airdropData: Record<string, { spawnTime: number, landTime: number, spawnPos: any, landPos: any, items: string[] }> = {}
 const itemNames = ref<Record<string, string>>({}) // itemId.json 映射
 let eventTimestamps: number[] = [] // 预计算的时间戳
 let lastProcessedTime = -1 // 上一次处理到的相对时间
+let lastUIUpdateTime = 0 // 侧边栏 UI 节流更新控制
 
 // 播放控制
 const isPlaying = ref(false)
@@ -182,22 +201,28 @@ const currentTime = ref(0)
 const maxTime = ref(0)
 const playSpeed = ref(5)
 let playbackTimer: any = null
+let lastFrameTime = 0
+let currentEventIndex = 0 // 核心优化：维护当前处理到的事件索引
 
 // Leaflet 实例
 let mapInstance: L.Map | null = null
 const currentZoom = ref(0)
-const minZoom = ref(-2)
+const minZoom = ref(-5) // 下调底限，支持大地图看全景
+let isFollowing = ref(true) // 是否锁定视角跟随玩家
 let playerMarkers: Record<string, L.CircleMarker> = {}
 let focusedViewLayer: L.Polygon | null = null // 仅保留聚焦玩家的锥形视角
 let playerFiringEffects: Record<string, L.Marker> = {}
-let blueZoneLayer: L.Polygon | null = null
+let blueZoneLayer: L.Circle | null = null
 let safeZoneLayer: L.Circle | null = null
 let redZoneLayer: L.Circle | null = null
 let airdropMarkers: Record<string, L.Marker> = {}
+let airdropPredictionCircles: Record<string, L.Circle> = {}
 let flightPathLayer: L.Polyline | null = null
 
 // 地图数据状态
+// 核心优化：playersState 仅用于 UI 响应，内部逻辑使用原始对象 playersData 提速
 const playersState = ref<Record<string, any>>({})
+let playersData: Record<string, any> = {} 
 const killFeed = ref<any[]>([])
 const zones = ref({
   safeZone: { x: 0, y: 0, radius: 0 },
@@ -261,12 +286,18 @@ const initMap = () => {
   // 2. 创建地图实例
   mapInstance = L.map('map', {
     crs: L.CRS.Simple,
-    minZoom: -2, // 初始值，后面会根据 fitBounds 自动调整
+    preferCanvas: true, 
+    minZoom: -5, // 支持深度缩小
     maxZoom: 4,
     zoomControl: false,
     attributionControl: false,
-    maxBounds: bounds, // 关键：限制拖拽范围
-    maxBoundsViscosity: 1.0 // 关键：边界粘性，防止露出黑边
+    maxBounds: bounds, 
+    maxBoundsViscosity: 1.0 
+  })
+
+  // 监听交互，自动断开跟随
+  mapInstance.on('dragstart zoomstart', () => {
+    isFollowing.value = false
   })
 
   // 3. 添加本地图片图层
@@ -288,9 +319,9 @@ const initMap = () => {
   })
 
   // 5. 初始化区域图层
-  safeZoneLayer = L.circle([0, 0], { radius: 0, color: 'white', weight: 1, fill: false }).addTo(mapInstance)
-  blueZoneLayer = L.polygon([], { color: '#409eff', weight: 0, fillColor: '#409eff', fillOpacity: 0.3, fillRule: 'evenodd' }).addTo(mapInstance)
-  redZoneLayer = L.circle([0, 0], { radius: 0, color: '#f56c6c', weight: 1, fillColor: '#f56c6c', fillOpacity: 0.3 }).addTo(mapInstance)
+  safeZoneLayer = L.circle([0, 0], { radius: 0, color: 'white', weight: 1.5, fill: false, dashArray: '5, 5' }).addTo(mapInstance)
+  blueZoneLayer = L.circle([0, 0], { radius: 0, color: '#409eff', weight: 2.5, fill: false }).addTo(mapInstance)
+  redZoneLayer = L.circle([0, 0], { radius: 0, color: '#f56c6c', weight: 1, fillColor: '#f56c6c', fillOpacity: 0.2 }).addTo(mapInstance)
 
   // 6. 渲染航线
   if (flightPath.value.length >= 2) {
@@ -300,11 +331,19 @@ const initMap = () => {
 }
 
 const updateMarkers = () => {
-  if (!mapInstance) return
+  if (!mapInstance || !mapInstance.getContainer()) return
 
-  Object.values(playersState.value).forEach(p => {
-    const lat = -(p.y / 100)
-    const lng = p.x / 100
+  // 批量获取当前所有玩家的平滑状态
+  const time = currentTime.value
+  const focusedName = focusedPlayer.value
+
+  Object.values(playersData).forEach(p => {
+    // 获取插值后的平滑坐标
+    const smoothState = getInterpolatedPlayerState(p.name, time)
+    if (!smoothState) return
+
+    const lat = -(smoothState.y / 100)
+    const lng = smoothState.x / 100
 
     if (!p.isAlive) {
       const marker = playerMarkers[p.name]
@@ -320,17 +359,22 @@ const updateMarkers = () => {
       return
     }
 
-    if (!playerMarkers[p.name]) {
-      const marker = L.circleMarker([lat, lng], {
-        radius: 4,
+    let marker = playerMarkers[p.name]
+    const isFocused = p.name === focusedName
+    const isHovered = p.name === hoveredPlayer.value
+    const shouldShowName = isFocused || isHovered
+
+    if (!marker) {
+      marker = L.circleMarker([lat, lng], {
+        radius: 5,
         fillColor: getPlayerColor(p),
-        color: p.name === focusedPlayer.value ? '#fff' : '#000',
-        weight: p.name === focusedPlayer.value ? 2 : 1,
+        color: isFocused ? '#fff' : '#000',
+        weight: isFocused ? 2 : 1,
         fillOpacity: 1
       }).addTo(mapInstance!)
 
       marker.bindTooltip(p.name, {
-        permanent: p.name === focusedPlayer.value,
+        permanent: shouldShowName,
         direction: 'top',
         className: 'player-tooltip',
         offset: [0, -5]
@@ -338,82 +382,49 @@ const updateMarkers = () => {
 
       playerMarkers[p.name] = marker
     } else {
-      const marker = playerMarkers[p.name]
-      if (marker) {
-        marker.setLatLng([lat, lng])
-        // 动态更新标记样式和颜色
-        marker.setStyle({
-          fillColor: getPlayerColor(p),
-          color: p.name === focusedPlayer.value ? '#fff' : '#000',
-          weight: p.name === focusedPlayer.value ? 2 : 1
-        })
+      marker.setLatLng([lat, lng])
+      
+      marker.setStyle({
+        color: isFocused ? '#fff' : '#000',
+        weight: isFocused ? 2 : 1,
+        fillColor: getPlayerColor(p)
+      })
 
-        // 动态更新 Tooltip 状态
-        const isFocused = p.name === focusedPlayer.value
-        const isHovered = p.name === hoveredPlayer.value
-        const shouldShowName = isFocused || isHovered
-        const tooltip = marker.getTooltip()
-
-        if (tooltip) {
-          if (shouldShowName && !tooltip.options.permanent) {
-             marker.unbindTooltip()
-             marker.bindTooltip(p.name, { permanent: true, direction: 'top', className: 'player-tooltip', offset: [0, -5] })
-          } else if (!shouldShowName && tooltip.options.permanent) {
-             marker.unbindTooltip()
-             marker.bindTooltip(p.name, { permanent: false, direction: 'top', className: 'player-tooltip', offset: [0, -5] })
-          }
+      const tooltip = marker.getTooltip()
+      if (tooltip) {
+        if (shouldShowName && !tooltip.options.permanent) {
+           marker.unbindTooltip()
+           marker.bindTooltip(p.name, { permanent: true, direction: 'top', className: 'player-tooltip', offset: [0, -5] })
+        } else if (!shouldShowName && tooltip.options.permanent) {
+           marker.unbindTooltip()
+           marker.bindTooltip(p.name, { permanent: false, direction: 'top', className: 'player-tooltip', offset: [0, -5] })
         }
       }
     }
 
-    // 更新视角 (仅针对聚焦玩家，渲染更明显的扇形 FOV)
-    if (p.name === focusedPlayer.value && p.isAlive) {
-      const fov = 45 // 视角张角
-      const length = 60 // 视角长度显著增加
-      const yaw = p.yaw - 90
-
-      // 生成扇形的点（包含圆心和圆弧上的多个点）
+    if (isFocused) {
+      const fov = 45 
+      const length = 60 
+      const yaw = smoothState.yaw - 90
       const points: [number, number][] = [[lat, lng]]
-      const step = 5 // 每 5 度一个点，使弧线更平滑
-
+      const step = 5 
       for (let i = -fov / 2; i <= fov / 2; i += step) {
         const rad = (yaw + i) * Math.PI / 180
-        points.push([
-          lat + Math.sin(rad) * length,
-          lng + Math.cos(rad) * length
-        ])
+        points.push([lat + Math.sin(rad) * length, lng + Math.cos(rad) * length])
       }
-
       if (!focusedViewLayer) {
-        focusedViewLayer = L.polygon(points, {
-          color: '#ff4d4f',
-          weight: 1,
-          opacity: 0.6,
-          fillColor: '#ff4d4f',
-          fillOpacity: 0.3
-        }).addTo(mapInstance!)
+        focusedViewLayer = L.polygon(points, { color: '#ff4d4f', weight: 1, opacity: 0.6, fillColor: '#ff4d4f', fillOpacity: 0.3 }).addTo(mapInstance!)
       } else {
         focusedViewLayer.setLatLngs(points)
       }
-    } else if (p.name === focusedPlayer.value && !p.isAlive && focusedViewLayer) {
-       mapInstance?.removeLayer(focusedViewLayer)
-       focusedViewLayer = null
     }
-
-    // 更新开火效果
-    const startTime = telemetry.value.length > 0 ? new Date(telemetry.value[0]._D).getTime() : 0
-    const attackElapsed = (p.lastAttackTime - startTime) / 1000
-    const isFiring = currentTime.value > attackElapsed && currentTime.value < attackElapsed + 0.15
-
+    
+    const attackElapsed = (p.lastAttackTime - (eventTimestamps[0] || 0)) / 1000
+    const isFiring = time > attackElapsed && time < attackElapsed + 0.15
     if (isFiring) {
       const existingFire = playerFiringEffects[p.name]
       if (!existingFire) {
-        const fireIcon = L.divIcon({
-          html: '<div class="firing-animation"></div>',
-          className: 'custom-div-icon',
-          iconSize: [30, 30],
-          iconAnchor: [15, 15]
-        })
+        const fireIcon = L.divIcon({ html: '<div class="firing-animation"></div>', className: 'custom-div-icon', iconSize: [30, 30], iconAnchor: [15, 15] })
         playerFiringEffects[p.name] = L.marker([lat, lng], { icon: fireIcon }).addTo(mapInstance!)
       } else {
         existingFire.setLatLng([lat, lng])
@@ -427,12 +438,17 @@ const updateMarkers = () => {
     }
   })
 
-  // 如果有聚焦的玩家，更新地图视角跟随
-  if (focusedPlayer.value && playersState.value[focusedPlayer.value]) {
-    const p = playersState.value[focusedPlayer.value]
-    if (p.isAlive && mapInstance) {
-      mapInstance.panTo([-(p.y / 100), p.x / 100], { animate: true, duration: 0.1 })
+  if (focusedName && playersData[focusedName] && isFollowing.value) {
+    const smoothState = getInterpolatedPlayerState(focusedName, time)
+    if (smoothState && mapInstance) {
+      // 使用 {animate: false} 避免与手动交互冲突，并在跟随模式下才执行
+      mapInstance.setView([-(smoothState.y / 100), smoothState.x / 100], mapInstance.getZoom(), { animate: false })
     }
+  }
+
+  if (focusedName && playersData[focusedName] && !playersData[focusedName].isAlive && focusedViewLayer) {
+    mapInstance?.removeLayer(focusedViewLayer)
+    focusedViewLayer = null
   }
 
   // 更新圈
@@ -441,7 +457,6 @@ const updateMarkers = () => {
     safeZoneLayer.setRadius(zones.value.safeZone.radius / 100)
   }
 
-  // 轰炸区
   if (zones.value.redZone.radius > 0 && redZoneLayer) {
     redZoneLayer.setLatLng([-(zones.value.redZone.y / 100), zones.value.redZone.x / 100])
     redZoneLayer.setRadius(zones.value.redZone.radius / 100)
@@ -449,42 +464,17 @@ const updateMarkers = () => {
     redZoneLayer.setRadius(0)
   }
 
-  // 蓝色毒圈遮罩 (使用 Polygon 环绕地图边界 + 内部圆形孔洞)
-  if (zones.value.blueZone.radius > 0 && blueZoneLayer && mapInstance) {
-    const mapName = match.value?.mapName
-    const mapSize = MAP_SIZES[mapName] || 8192
-
-    // 地图四个角
-    const outerRing: [number, number][] = [
-        [1000, -1000],
-        [1000, mapSize + 1000],
-        [-(mapSize + 1000), mapSize + 1000],
-        [-(mapSize + 1000), -1000]
-    ]
-
-    // 生成圆形的点
-    const innerRing: [number, number][] = []
-    const centerLat = -(zones.value.blueZone.y / 100)
-    const centerLng = zones.value.blueZone.x / 100
-    const radius = zones.value.blueZone.radius / 100
-
-    for (let i = 0; i <= 64; i++) {
-        const angle = (i / 64) * 2 * Math.PI
-        innerRing.push([
-            centerLat + radius * Math.sin(angle),
-            centerLng + radius * Math.cos(angle)
-        ])
-    }
-
-    blueZoneLayer.setLatLngs([outerRing, innerRing])
+  if (zones.value.blueZone.radius > 0 && blueZoneLayer) {
+    blueZoneLayer.setLatLng([-(zones.value.blueZone.y / 100), zones.value.blueZone.x / 100])
+    blueZoneLayer.setRadius(zones.value.blueZone.radius / 100)
   } else if (blueZoneLayer) {
-      blueZoneLayer.setLatLngs([])
+    blueZoneLayer.setRadius(0)
   }
 
-  // 更新空投渲染
-  const currentAirdropIds = new Set(airdrops.value.map(a => a.id))
-
-  // 清理不存在的空投
+  // 更新空投
+  const currentAirdrops = Object.entries(airdropData).filter(([_, data]) => time >= data.spawnTime)
+  const currentAirdropIds = new Set(currentAirdrops.map(([id]) => id))
+  
   Object.keys(airdropMarkers).forEach(id => {
     if (!currentAirdropIds.has(id)) {
       const marker = airdropMarkers[id]
@@ -493,22 +483,93 @@ const updateMarkers = () => {
     }
   })
 
-  // 添加或移动空投
-  airdrops.value.forEach(ad => {
-    const lat = -(ad.y / 100)
-    const lng = ad.x / 100
+  currentAirdrops.forEach(([id, data]) => {
+    const isLanded = time >= data.landTime
+    let lat, lng
+    
+    if (isLanded && data.landPos) {
+      lat = -(data.landPos.y / 100)
+      lng = data.landPos.x / 100
+    } else if (data.landPos) {
+      // 坠落中插值：简单线性模拟
+      const ratio = (time - data.spawnTime) / (data.landTime - data.spawnTime)
+      lat = -( (data.spawnPos.y + (data.landPos.y - data.spawnPos.y) * ratio) / 100 )
+      lng = (data.spawnPos.x + (data.landPos.x - data.spawnPos.x) * ratio) / 100
+    } else {
+      lat = -(data.spawnPos.y / 100)
+      lng = data.spawnPos.x / 100
+    }
 
-    const existingMarker = airdropMarkers[ad.id]
+    const existingMarker = airdropMarkers[id]
     if (!existingMarker) {
-      const airdropIcon = L.divIcon({
-        html: `<div class="airdrop-icon ${ad.isLanded ? 'landed' : 'dropping'}">📦</div>`,
-        className: 'custom-div-icon',
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
+      const airdropIcon = L.divIcon({ 
+        html: `<div class="airdrop-marker ${isLanded ? 'landed' : 'dropping'}">
+                <div class="airdrop-box">🎁</div>
+                ${!isLanded ? '<div class="parachute"></div>' : ''}
+               </div>`, 
+        className: 'custom-div-icon', 
+        iconSize: [30, 30], 
+        iconAnchor: [15, 15] 
       })
-      airdropMarkers[ad.id] = L.marker([lat, lng], { icon: airdropIcon }).addTo(mapInstance!)
+      airdropMarkers[id] = L.marker([lat, lng], { icon: airdropIcon, zIndexOffset: 1000 }).addTo(mapInstance!)
+      
+      // 绑定空投物品悬浮窗
+      if (data.items && data.items.length > 0) {
+        const itemsHtml = data.items.map(itemId => `
+          <div class="airdrop-tooltip-item">
+            <img src="${getItemImagePath(itemId)}" onerror="this.style.display='none'">
+            <span>${itemNames.value[itemId] || formatWeaponName(itemId)}</span>
+          </div>
+        `).join('')
+        
+        airdropMarkers[id].bindTooltip(`
+          <div class="airdrop-tooltip-content">
+            <div class="tooltip-title">空投物品</div>
+            ${itemsHtml}
+          </div>
+        `, {
+          direction: 'top',
+          className: 'airdrop-custom-tooltip',
+          offset: [0, -10],
+          sticky: true
+        })
+      }
+      
+      // 如果还没落地，在地面渲染一个落点标记
+      if (!isLanded && data.landPos && !airdropPredictionCircles[id]) {
+        airdropPredictionCircles[id] = L.circle([-(data.landPos.y / 100), data.landPos.x / 100], {
+          radius: 10,
+          color: '#f56c6c',
+          weight: 1,
+          dashArray: '5, 5',
+          fill: false,
+          interactive: false
+        }).addTo(mapInstance!)
+      }
     } else {
       existingMarker.setLatLng([lat, lng])
+      
+      // 如果已落地，且预告圈还存在，则移除
+      if (isLanded && airdropPredictionCircles[id]) {
+        const circle = airdropPredictionCircles[id]
+        if (circle && mapInstance && mapInstance.hasLayer(circle)) {
+          mapInstance.removeLayer(circle)
+        }
+        delete airdropPredictionCircles[id]
+      }
+
+      // 更新图标状态
+      const currentIcon = existingMarker.options.icon as L.DivIcon
+      const currentHtml = (currentIcon?.options?.html as string) || ''
+      if (isLanded && !currentHtml.includes('landed')) {
+        const landedIcon = L.divIcon({ 
+          html: `<div class="airdrop-marker landed"><div class="airdrop-box">🎁</div></div>`, 
+          className: 'custom-div-icon', 
+          iconSize: [30, 30], 
+          iconAnchor: [15, 15] 
+        })
+        existingMarker.setIcon(landedIcon)
+      }
     }
   })
 }
@@ -550,7 +611,7 @@ const getPlayerColor = (player: any): string => {
     .sort((a, b) => a.name.localeCompare(b.name))
 
   const memberIndex = teamMembers.findIndex(m => m.name === player.name)
-  const teamColors = ['#feca57', '#ff9f43', '#54a0ff', '#1dd1a1']
+  const teamColors = ['#feca57', '#ff4d4f', '#54a0ff', '#1dd1a1']
   return teamColors[memberIndex % teamColors.length] || '#ffffff'
 }
 
@@ -619,10 +680,37 @@ const WEAPON_CATEGORIES: Record<string, string> = {
 const getItemImagePath = (itemId: string) => {
   if (!itemId) return ''
 
-  // 规范化装备 ID（例如 Item_Head_E_01_Lv1_C -> Item_Head_E_00_Lv1_C）
-  // 许多素材文件以 00 命名
-  const normalizedId = itemId.replace(/_0[1-9]_/, '_00_')
+  // 1. 核心映射表：解决遥测 ID 与素材文件名完全不一致的顽疾
+  const ID_MAPPING: Record<string, string> = {
+    // 狙击与步枪
+    'Item_Weapon_Mosin_C': 'Item_Weapon_MosinNagant_C',
+    'Item_Weapon_Winchester_C': 'Item_Weapon_Win1894_C',
+    'Item_Weapon_Thompson_C': 'Item_Weapon_Thompson_C',
+    'Item_Weapon_HK416_C': 'Item_Weapon_HK416_C',
+    'Item_Weapon_M416_C': 'Item_Weapon_HK416_C',
+    'Item_Weapon_SCAR-L_C': 'Item_Weapon_SCAR-L_C',
+    // 微冲与手枪
+    'Item_Weapon_UMP_C': 'Item_Weapon_UMP_C', 
+    'Item_Weapon_Bizon_C': 'Item_Weapon_BizonPP19_C',
+    'Item_Weapon_UZI_C': 'Item_Weapon_UZI_C',
+    'Item_Weapon_M1911_C': 'Item_Weapon_M1911_C'
+  }
 
+  let finalId = ID_MAPPING[itemId] || itemId
+  let normalizedId = finalId
+
+  // 2. 分类处理规范化
+  if (finalId.startsWith('Item_Head') || finalId.startsWith('Item_Armor') || finalId.startsWith('Item_Back')) {
+    // 装备类：将皮肤序号（如 _01_）统一转为基础素材序号 _00_
+    normalizedId = finalId.replace(/_0[1-9]_/, '_00_')
+  } else {
+    // 武器类：仅移除可能的皮肤后缀，绝对不要动型号数字（如 416, 47）
+    // 正常的武器 ID 应该是 Item_Weapon_XXX_C，不需要额外处理数字
+    normalizedId = finalId.split('_').slice(0, 4).join('_')
+    if (!normalizedId.endsWith('_C')) normalizedId += '_C'
+  }
+
+  // 3. 路径路由
   if (normalizedId.startsWith('Item_Head')) return `/assets/item/Equipment/Headgear/${normalizedId}.png`
   if (normalizedId.startsWith('Item_Armor')) return `/assets/item/Equipment/Vest/${normalizedId}.png`
   if (normalizedId.startsWith('Item_Back')) return `/assets/item/Equipment/Backpack/${normalizedId}.png`
@@ -630,6 +718,7 @@ const getItemImagePath = (itemId: string) => {
   if (normalizedId.startsWith('Item_Weapon')) {
     const cat = WEAPON_CATEGORIES[normalizedId] || 'main'
     const folder = cat.charAt(0).toUpperCase() + cat.slice(1)
+    // 这里的路径需要匹配您 public 目录下的真实结构
     return `/assets/item/Weapon/${folder}/${normalizedId}.png`
   }
 
@@ -645,26 +734,34 @@ const fetchData = async () => {
       fetch('/assets/itemId.json').then(res => res.json())
     ])
     match.value = matchData
-    telemetry.value = telemetryData
+    // 使用 markRaw 彻底断开响应式链，减少数万个对象的内存占用
+    rawTelemetry = markRaw(telemetryData)
+    telemetry.value = rawTelemetry
     itemNames.value = itemsData
 
-    if (telemetry.value.length > 0) {
-      // 预计算所有事件的时间戳，避免在循环中重复解析日期字符串
-      const startTime = new Date(telemetry.value[0]._D).getTime()
-      eventTimestamps = telemetry.value.map(e => new Date(e._D).getTime())
+    if (rawTelemetry.length > 0) {
+      // 预计算所有事件的时间戳
+      const startTime = new Date(rawTelemetry[0]._D).getTime()
+      eventTimestamps = rawTelemetry.map(e => new Date(e._D).getTime())
 
       const endTime = eventTimestamps[eventTimestamps.length - 1] || startTime
       maxTime.value = (endTime - startTime) / 1000
 
+      // 预处理位置时间线，用于平滑移动插值
+      preprocessTimelines()
+
+      // 预处理空投数据
+      preprocessAirdrops()
+
       // 寻找正式登机/比赛开始时间点
-      const startEvent = telemetry.value.find(e => e._T === 'LogMatchStart')
+      const startEvent = rawTelemetry.find(e => e._T === 'LogMatchStart')
       if (startEvent) {
         matchStartTime.value = (new Date(startEvent._D).getTime() - startTime) / 1000
       }
 
-      // 提取航线（延长至贯穿全图）
+      // 提取航线
       const planePoints: any[] = []
-      telemetry.value.forEach(e => {
+      rawTelemetry.forEach(e => {
         if (e._T === 'LogPlayerPosition' && e.character.location.z > 10000) {
              planePoints.push({ x: e.character.location.x, y: e.character.location.y })
         }
@@ -703,7 +800,7 @@ const fetchData = async () => {
 
     loading.value = false
     isPlaying.value = true // 数据加载完成后自动开始播放
-    playbackLoop()
+    playbackTimer = requestAnimationFrame(playbackLoop)
   } catch (err) {
     console.error(err)
     ElMessage.error('获取遥测数据失败')
@@ -711,280 +808,294 @@ const fetchData = async () => {
   }
 }
 
+// 预处理空投数据
+const preprocessAirdrops = () => {
+  airdropData = {}
+  const firstTimestamp = eventTimestamps[0] || 0
+  let foundCount = 0
+  
+  rawTelemetry.forEach((event, index) => {
+    const ts = eventTimestamps[index]
+    if (ts === undefined) return
+    const time = (ts - firstTimestamp) / 1000
+
+    if (event._T === 'LogCarePackageSpawn') {
+      foundCount++
+      const id = event.itemPackage?.itemPackageId
+      if (!id) return
+      
+      // 直接从 Spawn 事件中提取初始物品清单
+      const initialItems = (event.itemPackage.items || []).map((item: any) => item.itemId)
+
+      airdropData[id] = {
+        spawnTime: time,
+        landTime: 999999,
+        spawnPos: { x: event.itemPackage.location.x, y: event.itemPackage.location.y, z: event.itemPackage.location.z },
+        landPos: null,
+        items: initialItems
+      }
+    } else if (event._T === 'LogCarePackageLand') {
+      const id = event.itemPackage?.itemPackageId
+      if (id && airdropData[id]) {
+        airdropData[id].landTime = time
+        airdropData[id].landPos = { x: event.itemPackage.location.x, y: event.itemPackage.location.y, z: event.itemPackage.location.z }
+      }
+    } else if (event._T === 'LogItemDrop') {
+      // 收集空投箱内的初始物品
+      const packageId = event.itemPackageId
+      if (packageId && airdropData[packageId] && event.item) {
+        if (!airdropData[packageId].items.includes(event.item.itemId)) {
+          airdropData[packageId].items.push(event.item.itemId)
+        }
+      }
+    }
+  })
+}
+
+// 预处理位置时间线
+const preprocessTimelines = () => {
+  playerTimelines = {}
+  const firstTimestamp = eventTimestamps[0] || 0
+  rawTelemetry.forEach((event, index) => {
+    const ts = eventTimestamps[index]
+    if (ts === undefined) return
+    const time = (ts - firstTimestamp) / 1000
+    if (event._T === 'LogPlayerPosition') {
+      const name = event.character.name
+      if (!playerTimelines[name]) playerTimelines[name] = []
+      const timeline = playerTimelines[name]
+      const ts = eventTimestamps[index]
+      if (timeline && ts !== undefined) {
+        timeline.push({
+          time,
+          x: event.character.location.x,
+          y: event.character.location.y,
+          yaw: event.character.orientation?.yaw || 0
+        })
+      }
+    }
+  })
+}
+
+// 获取平滑差值后的玩家位置
+const getInterpolatedPlayerState = (playerName: string, time: number) => {
+  const timeline = playerTimelines[playerName]
+  if (!timeline || timeline.length === 0) return null
+
+  // 二分查找当前时间对应的索引区间
+  let low = 0, high = timeline.length - 1
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    if (timeline[mid].time < time) low = mid + 1
+    else high = mid - 1
+  }
+
+  const nextIdx = low
+  const prevIdx = Math.max(0, low - 1)
+
+  if (nextIdx >= timeline.length) return timeline[timeline.length - 1]
+  if (nextIdx === 0) return timeline[0]
+
+  const prev = timeline[prevIdx]
+  const next = timeline[nextIdx]
+  
+  if (next.time === prev.time) return prev
+
+  // 在正式比赛（登机）开始前，锁定在出生岛位置
+  if (matchStartTime.value > 0 && time < matchStartTime.value) return prev
+
+  // 核心修复：如果当前插值区间跨越了“登机”点（即 prev 是出生岛点，next 是飞机/赛中点）
+  // 只要时间到达了 matchStartTime，就直接显示 next 位置，彻底消除任何跨状态的滑行效果
+  if (matchStartTime.value > 0 && prev.time < matchStartTime.value) {
+    return next
+  }
+
+  const ratio = (time - prev.time) / (next.time - prev.time)
+  
+  // 角度插值优化：处理 0/360 度跨越问题，实现最短路径旋转
+  let deltaYaw = next.yaw - prev.yaw
+  if (deltaYaw > 180) deltaYaw -= 360
+  if (deltaYaw < -180) deltaYaw += 360
+  const smoothYaw = prev.yaw + deltaYaw * ratio
+
+  return {
+    x: prev.x + (next.x - prev.x) * ratio,
+    y: prev.y + (next.y - prev.y) * ratio,
+    yaw: smoothYaw
+  }
+}
+
 const initPlayers = () => {
-  const newPlayers: Record<string, any> = {}
-  telemetry.value.forEach(event => {
+  playersData = {}
+  rawTelemetry.forEach(event => {
     if (event._T === 'LogPlayerPosition') {
       const name = event.character.name
       const accountId = event.character.accountId
-
-      // 过滤掉没有 AccountID 或 AccountID 为空的占位符玩家 (通常是游戏机制生成的 Phantom 玩家)
-      if (!accountId || accountId === "" || accountId.startsWith('ai.')) {
-        return
-      }
-
-      if (!newPlayers[name]) {
-        newPlayers[name] = {
+      if (!accountId || accountId === "" || accountId.startsWith('ai.')) return
+      if (!playersData[name]) {
+        playersData[name] = {
           name,
           x: event.character.location.x,
           y: event.character.location.y,
           hp: event.character.health,
           isAlive: true,
           teamId: event.character.teamId,
-          kills: 0,
-          dbnos: 0,
-          revives: 0,
-          damage: 0,
-          yaw: 0,
-          lastAttackTime: 0,
-          items: {
-            helmet: '',
-            vest: '',
-            backpack: '',
-            weapon1: '',
-            weapon2: '',
-            weapon3: '',
-            weapon4: ''
-          }
+          kills: 0, dbnos: 0, revives: 0, damage: 0,
+          yaw: 0, lastAttackTime: 0,
+          currentWeapon: '', // 新增：追踪当前手持武器
+          items: { helmet: '', vest: '', backpack: '', weapon1: '', weapon2: '', weapon3: '', weapon4: '' }
         }
       }
     }
   })
-  playersState.value = newPlayers
+  playersState.value = { ...playersData }
 }
 
 const updateState = (time: number) => {
-  if (telemetry.value.length === 0 || eventTimestamps.length === 0) return
+  if (rawTelemetry.length === 0 || eventTimestamps.length === 0) return
 
   const startTime = eventTimestamps[0] || 0
   const targetTime = startTime + time * 1000
-
-  // 性能优化：如果时间是向后跳跃（拖动进度条），则需要全量重置状态
-  // 如果是正常向前播放，则只需处理增量事件
   const isForward = time >= lastProcessedTime && lastProcessedTime !== -1
 
   if (!isForward) {
-    // 全量重置
-    Object.values(playersState.value).forEach(p => {
-      p.isAlive = true
-      p.kills = 0
-      p.dbnos = 0
-      p.revives = 0
-      p.damage = 0
-      p.lastAttackTime = 0
-      p.items = {
-        helmet: '',
-        vest: '',
-        backpack: '',
-        weapon1: '',
-        weapon2: '',
-        weapon3: '',
-        weapon4: ''
-      }
+    Object.values(playersData).forEach(p => {
+      p.isAlive = true; p.kills = 0; p.dbnos = 0; p.revives = 0; p.damage = 0; p.lastAttackTime = 0;
+      p.currentWeapon = '';
+      p.items = { helmet: '', vest: '', backpack: '', weapon1: '', weapon2: '', weapon3: '', weapon4: '' }
     })
     killFeed.value = []
     airdrops.value = []
+    currentEventIndex = 0
   }
 
-  // 遍历事件
-  for (let i = 0; i < telemetry.value.length; i++) {
-    const eventTime = eventTimestamps[i]
-    if (eventTime === undefined) continue
+  // 核心优化：使用 currentEventIndex 指针增量处理事件，避免 O(N) 遍历
+  while (currentEventIndex < rawTelemetry.length) {
+    const eventTime = eventTimestamps[currentEventIndex]
+    if (eventTime === undefined || eventTime > targetTime) break
 
-    // 如果是向前增量更新，跳过已经处理过的事件
-    if (isForward && eventTime <= startTime + lastProcessedTime * 1000) continue
+    const event = rawTelemetry[currentEventIndex]
+    const p = event.character ? playersData[event.character.name] : 
+              event.attacker ? playersData[event.attacker.name] : 
+              event.victim ? playersData[event.victim.name] : null
 
-    // 如果超过目标时间，停止处理
-    if (eventTime > targetTime) break
-
-    const event = telemetry.value[i]
     switch (event._T) {
       case 'LogPlayerPosition':
-        if (playersState.value[event.character.name]) {
-          const p = playersState.value[event.character.name]
-          p.x = event.character.location.x
-          p.y = event.character.location.y
+        if (p) {
           p.hp = event.character.health
-          
-          // 逻辑修正：区分“复活”与“扶起”
-          // 如果玩家之前是死亡状态，且现在出现在高空（飞机上 z > 10000），判定为蓝卡复活回归
-          if (!p.isAlive && event.character.location.z > 10000) {
+          // 复活逻辑同步
+          if (!p.isAlive && (event.character.location.z > 10000 || p.hp > 0)) {
             p.isAlive = true
-            killFeed.value.unshift({
-              killer: p.name,
-              victim: '',
-              action: '重新进入了战场',
-              isGroggy: false,
-              isRevive: false,
-              isRespawn: true,
-              time: eventTime
-            })
-          } else if (!p.isAlive && p.hp > 0) {
-            // 兜底：如果血量恢复但不在飞机上，说明是错过了扶起事件
-            p.isAlive = true
-          }
-          
-          if (event.character.location.z < 2000 && event.character.orientation) {
-             p.yaw = event.character.orientation.yaw || 0
+            if (event.character.location.z > 10000) {
+              killFeed.value.unshift({ killer: p.name, victim: '', action: '重新进入了战场', isRespawn: true, time: eventTime })
+            }
           }
         }
         break
-      case 'LogPlayerAttack':
-        if (event.attacker && playersState.value[event.attacker.name]) {
-          playersState.value[event.attacker.name].lastAttackTime = eventTime
-        }
-        break
-      case 'LogCarePackageSpawn':
-        airdrops.value.push({
-          id: event.itemPackage.itemPackageId,
-          x: event.itemPackage.location.x,
-          y: event.itemPackage.location.y,
-          isLanded: false
-        })
-        break
-      case 'LogCarePackageLand':
-        const ad = airdrops.value.find(a => a.id === event.itemPackage.itemPackageId)
-        if (ad) {
-          ad.isLanded = true
-          ad.x = event.itemPackage.location.x
-          ad.y = event.itemPackage.location.y
+      case 'LogPlayerAttack': 
+        if (p) {
+          p.lastAttackTime = eventTime
+          // 兜底逻辑：开火时更新手持武器
+          if (event.weapon?.itemId) {
+            p.currentWeapon = event.weapon.itemId
+          }
         }
         break
       case 'LogPlayerTakeDamage':
-        if (event.attacker && playersState.value[event.attacker.name]) {
-          playersState.value[event.attacker.name].damage += event.damage
-        }
+        const attacker = event.attacker ? playersData[event.attacker.name] : null
+        if (attacker) attacker.damage += event.damage
         break
       case 'LogPlayerMakeGroggy':
-        if (event.attacker && playersState.value[event.attacker.name]) {
-          playersState.value[event.attacker.name].dbnos++
-        }
-        if (event.victim && playersState.value[event.victim.name]) {
-          killFeed.value.unshift({
-            killer: event.attacker ? event.attacker.name : 'Unknown',
-            victim: event.victim.name,
-            action: '击倒了',
-            isGroggy: true,
-            time: eventTime
-          })
+        const killerG = event.attacker ? playersData[event.attacker.name] : null
+        if (killerG) killerG.dbnos++
+        if (event.victim) {
+          killFeed.value.unshift({ killer: event.attacker?.name || 'Unknown', victim: event.victim.name, action: '击倒了', isGroggy: true, time: eventTime })
         }
         break
       case 'LogPlayerRevive':
-        if (event.reviver && playersState.value[event.reviver.name]) {
-          playersState.value[event.reviver.name].revives++
-        }
-        if (event.victim && playersState.value[event.victim.name]) {
-          const v = playersState.value[event.victim.name]
-          v.isAlive = true
-          v.hp = event.victim.health || 20 // 扶起后通常有少量血量
-          killFeed.value.unshift({
-            killer: event.reviver ? event.reviver.name : 'Unknown',
-            victim: event.victim.name,
-            action: '扶起了',
-            isGroggy: false,
-            isRevive: true,
-            time: eventTime
-          })
+        const reviver = event.reviver ? playersData[event.reviver.name] : null
+        if (reviver) reviver.revives++
+        const victimR = event.victim ? playersData[event.victim.name] : null
+        if (victimR) {
+          victimR.isAlive = true; victimR.hp = event.victim.health || 20
+          killFeed.value.unshift({ killer: event.reviver?.name || 'Unknown', victim: event.victim.name, action: '扶起了', isRevive: true, time: eventTime })
         }
         break
       case 'LogPlayerKillV2':
-        if (event.killer && playersState.value[event.killer.name]) {
-          playersState.value[event.killer.name].kills++
-        }
-        if (event.victim && playersState.value[event.victim.name]) {
-          playersState.value[event.victim.name].isAlive = false
-          playersState.value[event.victim.name].hp = 0
-          killFeed.value.unshift({
-            killer: event.killer ? event.killer.name : 'Suicide',
-            victim: event.victim.name,
-            action: '淘汰了',
-            isGroggy: false,
-            time: eventTime
-          })
+        const killerK = event.killer ? playersData[event.killer.name] : null
+        if (killerK) killerK.kills++
+        const victimK = event.victim ? playersData[event.victim.name] : null
+        if (victimK) {
+          victimK.isAlive = false; victimK.hp = 0
+          killFeed.value.unshift({ killer: event.killer?.name || 'Suicide', victim: event.victim.name, action: '淘汰了', time: eventTime })
         }
         break
       case 'LogGameStatePeriodic':
         if (event.gameState) {
-            zones.value.safeZone = {
-                x: event.gameState.safetyZonePosition.x,
-                y: event.gameState.safetyZonePosition.y,
-                radius: event.gameState.safetyZoneRadius
-            }
-            zones.value.blueZone = {
-                x: event.gameState.poisonGasWarningPosition.x,
-                y: event.gameState.poisonGasWarningPosition.y,
-                radius: event.gameState.poisonGasWarningRadius
-            }
+          // 交换赋值逻辑以纠正颜色反向的问题
+          zones.value.blueZone = { x: event.gameState.safetyZonePosition.x, y: event.gameState.safetyZonePosition.y, radius: event.gameState.safetyZoneRadius }
+          zones.value.safeZone = { x: event.gameState.poisonGasWarningPosition.x, y: event.gameState.poisonGasWarningPosition.y, radius: event.gameState.poisonGasWarningRadius }
         }
         break
-      case 'LogRedZoneSpawn':
-        zones.value.redZone = {
-            x: event.location.x,
-            y: event.location.y,
-            radius: event.radius
-        }
+      case 'LogCarePackageSpawn':
+        airdrops.value.push({ id: event.itemPackage.itemPackageId, x: event.itemPackage.location.x, y: event.itemPackage.location.y, isLanded: false }); break
+      case 'LogCarePackageLand':
+        const ad = airdrops.value.find(a => a.id === event.itemPackage.itemPackageId)
+        if (ad) { ad.isLanded = true; ad.x = event.itemPackage.location.x; ad.y = event.itemPackage.location.y; }
         break
       case 'LogItemDrop':
-      case 'LogItemPickup': // 拾取作为备选，仅针对护具
-      case 'LogItemEquip': {
-        const char = event.character || event.attacker || event.victim
-        if (!char || !char.name) break
-
-        const p = playersState.value[char.name]
-        if (!p) break
-
-        const itemId = event.item?.itemId
-        if (!itemId) break
-
-        if (event._T === 'LogItemDrop') {
-          if (p.items.helmet === itemId) p.items.helmet = ''
-          else if (p.items.vest === itemId) p.items.vest = ''
-          else if (p.items.backpack === itemId) p.items.backpack = ''
-          else if (p.items.weapon1 === itemId) p.items.weapon1 = ''
-          else if (p.items.weapon2 === itemId) p.items.weapon2 = ''
-          else if (p.items.weapon3 === itemId) p.items.weapon3 = ''
-          else if (p.items.weapon4 === itemId) p.items.weapon4 = ''
-          break
-        }
-
-        if (itemId.startsWith('Item_Head')) p.items.helmet = itemId
-        else if (itemId.startsWith('Item_Armor')) p.items.vest = itemId
-        else if (itemId.startsWith('Item_Back')) p.items.backpack = itemId
-        else if (itemId.startsWith('Item_Weapon')) {
-          const cat = WEAPON_CATEGORIES[itemId] || 'main'
-          if (cat === 'handgun') p.items.weapon3 = itemId
-          else if (cat === 'melee' || cat === 'throwable') p.items.weapon4 = itemId
-          else {
-            if (p.items.weapon1 === itemId || p.items.weapon2 === itemId) break
-            if (!p.items.weapon1) p.items.weapon1 = itemId
-            else p.items.weapon2 = itemId
+      case 'LogItemPickup':
+      case 'LogItemEquip':
+      case 'LogItemUnequip':
+        const itemP = event.character ? playersData[event.character.name] : null
+        if (itemP && event.item) {
+          const id = event.item.itemId
+          if (event._T === 'LogItemUnequip' || event._T === 'LogItemDrop') {
+            if (itemP.currentWeapon === id) itemP.currentWeapon = ''
+            if (itemP.items.helmet === id) itemP.items.helmet = ''
+            else if (itemP.items.vest === id) itemP.items.vest = ''
+            else if (itemP.items.backpack === id) itemP.items.backpack = ''
+            else if (itemP.items.weapon1 === id) itemP.items.weapon1 = ''
+            else if (itemP.items.weapon2 === id) itemP.items.weapon2 = ''
+            else if (itemP.items.weapon3 === id) itemP.items.weapon3 = ''
+            else if (itemP.items.weapon4 === id) itemP.items.weapon4 = ''
+          } else {
+            if (id.startsWith('Item_Head')) itemP.items.helmet = id
+            else if (id.startsWith('Item_Armor')) itemP.items.vest = id
+            else if (id.startsWith('Item_Back')) itemP.items.backpack = id
+            else if (id.startsWith('Item_Weapon')) {
+              const cat = WEAPON_CATEGORIES[id] || 'main'
+              if (cat === 'handgun') itemP.items.weapon3 = id
+              else if (cat === 'melee' || cat === 'throwable') itemP.items.weapon4 = id
+              else {
+                if (itemP.items.weapon1 !== id && itemP.items.weapon2 !== id) {
+                  if (!itemP.items.weapon1) itemP.items.weapon1 = id
+                  else itemP.items.weapon2 = id
+                }
+              }
+            }
           }
         }
         break
-      }
-      case 'LogItemUnequip': {
-        const p = playersState.value[event.character?.name]
-        if (!p) break
-        const itemId = event.item?.itemId
-        if (!itemId) break
-
-        if (p.items.helmet === itemId) p.items.helmet = ''
-        else if (p.items.vest === itemId) p.items.vest = ''
-        else if (p.items.backpack === itemId) p.items.backpack = ''
-        else if (p.items.weapon1 === itemId) p.items.weapon1 = ''
-        else if (p.items.weapon2 === itemId) p.items.weapon2 = ''
-        else if (p.items.weapon3 === itemId) p.items.weapon3 = ''
-        else if (p.items.weapon4 === itemId) p.items.weapon4 = ''
-        break
-      }
     }
+    currentEventIndex++
   }
+
   lastProcessedTime = time
+  const now = Date.now()
+  if (now - lastUIUpdateTime > 100) {
+    playersState.value = { ...playersData }
+    lastUIUpdateTime = now
+  }
 }
 
-const playbackLoop = () => {
+const playbackLoop = (now: number) => {
+  if (!lastFrameTime) lastFrameTime = now
+  const deltaTime = (now - lastFrameTime) / 1000
+  lastFrameTime = now
+
   if (isPlaying.value) {
-    currentTime.value += (1 / 60) * playSpeed.value
+    currentTime.value += deltaTime * playSpeed.value
     if (currentTime.value >= maxTime.value) {
       currentTime.value = maxTime.value
       isPlaying.value = false
@@ -996,158 +1107,175 @@ const playbackLoop = () => {
   playbackTimer = requestAnimationFrame(playbackLoop)
 }
 
-const togglePlay = () => {
-  isPlaying.value = !isPlaying.value
-}
-
-const resetPlayback = () => {
-  isPlaying.value = false
-  currentTime.value = 0
-  initPlayers()
-}
-
-const onSliderChange = (val: number) => {
-  currentTime.value = val
-  updateState(val)
-}
-
+const togglePlay = () => { isPlaying.value = !isPlaying.value }
+const resetPlayback = () => { isPlaying.value = false; currentTime.value = 0; initPlayers(); }
+const onSliderChange = (val: number) => { currentTime.value = val; updateState(val); updateMarkers(); }
 const seekToKill = (eventTime: number) => {
-  if (telemetry.value.length === 0 || eventTimestamps.length === 0) return
   const startTime = eventTimestamps[0] || 0
-  // 定位到该次击杀前 1 秒
   const targetRelativeTime = Math.max(0, (eventTime - startTime) / 1000 - 1)
   currentTime.value = targetRelativeTime
   updateState(targetRelativeTime)
   updateMarkers()
 }
 
-const onZoomSliderChange = (val: number) => {
-  if (mapInstance) {
-    mapInstance.setZoom(val)
-  }
-}
-
-const changeZoom = (delta: number) => {
-  if (mapInstance) {
-    const newZoom = mapInstance.getZoom() + delta
-    mapInstance.setZoom(newZoom)
-  }
-}
+const onZoomSliderChange = (val: number) => { if (mapInstance) mapInstance.setZoom(val) }
+const changeZoom = (delta: number) => { if (mapInstance) mapInstance.setZoom(mapInstance.getZoom() + delta) }
 
 const WEAPON_NAME_DICT: Record<string, string> = {
-  'Item_Weapon_AK47_C': 'AKM',
-  'Item_Weapon_M16A4_C': 'M16A4',
-  'Item_Weapon_SCAR-L_C': 'SCAR-L',
-  'Item_Weapon_HK416_C': 'M416',
-  'Item_Weapon_AUG_C': 'AUG',
-  'Item_Weapon_BerylM762_C': 'Beryl',
-  'Item_Weapon_Mk47Mutant_C': 'Mk47',
-  'Item_Weapon_Groza_C': 'Groza',
-  'Item_Weapon_G36C_C': 'G36C',
-  'Item_Weapon_K2_C': 'K2',
-  'Item_Weapon_ACE32_C': 'ACE32',
-  'Item_Weapon_Kar98k_C': 'Kar98k',
-  'Item_Weapon_M24_C': 'M24',
-  'Item_Weapon_AWM_C': 'AWM',
-  'Item_Weapon_Win1894_C': 'Win94',
-  'Item_Weapon_Mosin_C': 'Mosin',
-  'Item_Weapon_Mini14_C': 'Mini14',
-  'Item_Weapon_SKS_C': 'SKS',
-  'Item_Weapon_Mk14_C': 'Mk14',
-  'Item_Weapon_QBU88_C': 'QBU',
-  'Item_Weapon_SLR_C': 'SLR',
-  'Item_Weapon_VSS_C': 'VSS',
-  'Item_Weapon_UMP_C': 'UMP45',
-  'Item_Weapon_UZI_C': 'Micro UZI',
-  'Item_Weapon_Vector_C': 'Vector',
-  'Item_Weapon_TommyGun_C': 'Tommy Gun',
-  'Item_Weapon_MP5K_C': 'MP5K',
-  'Item_Weapon_P90_C': 'P90',
-  'Item_Weapon_M249_C': 'M249',
-  'Item_Weapon_DP28_C': 'DP-28',
-  'Item_Weapon_MG3_C': 'MG3',
-  'Item_Weapon_Saiga12_C': 'S12K',
-  'Item_Weapon_Berreta686_C': 'S686',
-  'Item_Weapon_Winchester12_C': 'S1897',
-  'Item_Weapon_DBS_C': 'DBS',
-  'Item_Weapon_Pan_C': '平底锅',
-  'Item_Weapon_Machete_C': '砍刀',
-  'Item_Weapon_Crowbar_C': '物理学圣剑',
-  'Item_Weapon_Sickle_C': '镰刀',
-  'Item_Weapon_Grenade_C': '手雷',
-  'Item_Weapon_Molotov_C': '燃烧瓶',
-  'Item_Weapon_BluezoneGrenade_C': '蓝圈手雷',
-  'WeapDacia_96_C': '达契亚轿车',
-  'WeapUAZ_Armored_C': 'UAZ',
-  'WeapMotorbike_600_C': '摩托车',
-  'Bluezone': '毒圈',
-  'RedZone': '轰炸',
-  'Suicide': '自杀',
-  'Drown': '溺水',
-  'Fall': '坠落'
+  'Item_Weapon_AK47_C': 'AKM', 'Item_Weapon_M16A4_C': 'M16A4', 'Item_Weapon_SCAR-L_C': 'SCAR-L',
+  'Item_Weapon_HK416_C': 'M416', 'Item_Weapon_AUG_C': 'AUG', 'Item_Weapon_BerylM762_C': 'Beryl',
+  'Item_Weapon_Mk47Mutant_C': 'Mk47', 'Item_Weapon_Groza_C': 'Groza', 'Item_Weapon_G36C_C': 'G36C',
+  'Item_Weapon_K2_C': 'K2', 'Item_Weapon_ACE32_C': 'ACE32', 'Item_Weapon_Kar98k_C': 'Kar98k',
+  'Item_Weapon_M24_C': 'M24', 'Item_Weapon_AWM_C': 'AWM', 'Item_Weapon_Win1894_C': 'Win94',
+  'Item_Weapon_Mosin_C': 'Mosin', 'Item_Weapon_Mini14_C': 'Mini14', 'Item_Weapon_SKS_C': 'SKS',
+  'Item_Weapon_Mk14_C': 'Mk14', 'Item_Weapon_QBU88_C': 'QBU', 'Item_Weapon_SLR_C': 'SLR',
+  'Item_Weapon_VSS_C': 'VSS', 'Item_Weapon_UMP_C': 'UMP45', 'Item_Weapon_UZI_C': 'Micro UZI',
+  'Item_Weapon_Vector_C': 'Vector', 'Item_Weapon_TommyGun_C': 'Tommy Gun', 'Item_Weapon_MP5K_C': 'MP5K',
+  'Item_Weapon_P90_C': 'P90', 'Item_Weapon_M249_C': 'M249', 'Item_Weapon_DP28_C': 'DP-28',
+  'Item_Weapon_MG3_C': 'MG3', 'Item_Weapon_Saiga12_C': 'S12K', 'Item_Weapon_Berreta686_C': 'S686',
+  'Item_Weapon_Winchester12_C': 'S1897', 'Item_Weapon_DBS_C': 'DBS', 'Item_Weapon_Pan_C': '平底锅',
+  'Item_Weapon_Machete_C': '砍刀', 'Item_Weapon_Crowbar_C': '物理学圣剑', 'Item_Weapon_Sickle_C': '镰刀',
+  'Item_Weapon_Grenade_C': '手雷', 'Item_Weapon_Molotov_C': '燃烧瓶', 'Item_Weapon_BluezoneGrenade_C': '蓝圈手雷',
+  'WeapDacia_96_C': '达契亚轿车', 'WeapUAZ_Armored_C': 'UAZ', 'WeapMotorbike_600_C': '摩托车',
+  'Bluezone': '毒圈', 'RedZone': '轰炸', 'Suicide': '自杀', 'Drown': '溺水', 'Fall': '坠落'
 }
+const formatWeaponName = (name: string) => WEAPON_NAME_DICT[name] || name.replace('Item_Weapon_', '').replace('_C', '')
 
-const formatWeaponName = (name: string) => {
-  if (!name) return '未知'
-  return WEAPON_NAME_DICT[name] || name.replace('Item_Weapon_', '').replace('_C', '')
-}
-
-// 交互逻辑
 const focusPlayer = (name: string) => {
   focusedPlayer.value = name
-  const p = playersState.value[name]
-  if (p && mapInstance) {
-    // 仅平移中心点，不再自动改变缩放级别，避免模糊
-    mapInstance.panTo([-(p.y / 100), p.x / 100], { animate: true })
-  }
+  isFollowing.value = true // 重新点选玩家时，恢复视角锁定
+  const p = playersData[name]
+  if (p && mapInstance) mapInstance.panTo([-(p.y / 100), p.x / 100], { animate: true })
 }
 
 const scrollToPlayer = (name: string) => {
   nextTick(() => {
-    const player = playersState.value[name]
+    const player = playersData[name]
     if (player) {
       const el = document.getElementById(`team-${player.teamId}`)
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-      }
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
   })
 }
 
-const handleEsc = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    router.back()
-  }
-}
+const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') router.back() }
+watch([focusedPlayer, hoveredPlayer], () => { if (!isPlaying.value) updateMarkers() })
+const goToPlayer = (name: string) => { window.open(router.resolve(`/player/${name}`).href, '_blank') }
 
-watch([focusedPlayer, hoveredPlayer], () => {
-  if (!isPlaying.value) {
-    updateMarkers()
-  }
-})
-
-const goToPlayer = (name: string) => {
-  const url = router.resolve(`/player/${name}`).href
-  window.open(url, '_blank')
-}
-
-onMounted(() => {
-  fetchData()
-  window.addEventListener('keydown', handleEsc)
-})
-
+onMounted(() => { fetchData(); window.addEventListener('keydown', handleEsc); })
 onUnmounted(() => {
   window.removeEventListener('keydown', handleEsc)
   if (playbackTimer) cancelAnimationFrame(playbackTimer)
-  if (mapInstance) {
-    mapInstance.remove()
-    mapInstance = null
-  }
+  if (mapInstance) { mapInstance.remove(); mapInstance = null; }
 })
 </script>
 
 <style scoped lang="scss">
 .replay-container {
+  :deep(.airdrop-custom-tooltip) {
+    background: rgba(30, 30, 30, 0.95) !important;
+    border: 1px solid #444 !important;
+    color: white !important;
+    padding: 8px !important;
+    border-radius: 4px !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+    
+    &::before {
+      border-top-color: rgba(30, 30, 30, 0.95) !important;
+    }
+
+    .airdrop-tooltip-content {
+      min-width: 120px;
+      
+      .tooltip-title {
+        font-size: 12px;
+        color: #999;
+        margin-bottom: 6px;
+        border-bottom: 1px solid #444;
+        padding-bottom: 4px;
+        font-weight: bold;
+      }
+
+      .airdrop-tooltip-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+        
+        &:last-child { margin-bottom: 0; }
+
+        img {
+          width: 24px;
+          height: 24px;
+          object-fit: contain;
+          background: rgba(255,255,255,0.05);
+          border-radius: 2px;
+        }
+
+        span {
+          font-size: 12px;
+          white-space: nowrap;
+        }
+      }
+    }
+  }
+
+  :deep(.airdrop-marker) {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    
+    .airdrop-box {
+      font-size: 20px;
+      line-height: 1;
+      filter: drop-shadow(0 0 2px rgba(0,0,0,0.5));
+    }
+    
+    &.dropping {
+      animation: drop-swing 2s ease-in-out infinite;
+      
+      .parachute {
+        width: 20px;
+        height: 12px;
+        background: #f56c6c;
+        border-radius: 20px 20px 0 0;
+        position: relative;
+        margin-bottom: -2px;
+        box-shadow: 0 -2px 4px rgba(0,0,0,0.2);
+        
+        &::after {
+          content: '';
+          position: absolute;
+          bottom: -4px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 14px;
+          height: 6px;
+          border-left: 1px solid #ddd;
+          border-right: 1px solid #ddd;
+        }
+      }
+    }
+    
+    &.landed {
+      .airdrop-box {
+        animation: land-bounce 0.5s ease-out;
+      }
+    }
+  }
+
+  @keyframes drop-swing {
+    0%, 100% { transform: rotate(-5deg); }
+    50% { transform: rotate(5deg); }
+  }
+  
+  @keyframes land-bounce {
+    0% { transform: scale(1.2); }
+    50% { transform: scale(0.9); }
+    100% { transform: scale(1); }
+  }
+
   :deep(.firing-animation) {
     width: 100%;
     height: 100%;
