@@ -57,15 +57,13 @@
                 title="登机时刻"
               ></div>
               <!-- 玩家事件标记 -->
-              <template v-for="(evt, idx) in playerEvents" :key="idx">
-                <el-tooltip :content="evt.label" placement="top">
-                  <div 
-                    class="event-marker" 
-                    :class="evt.type"
-                    :style="{ left: (evt.time / maxTime * 100) + '%', backgroundColor: evt.color }"
-                  ></div>
-                </el-tooltip>
-              </template>
+              <el-tooltip v-for="(evt, idx) in playerEvents" :key="idx" :content="evt.label" placement="top">
+                <div
+                  class="event-marker"
+                  :class="evt.type"
+                  :style="{ left: (evt.time / maxTime * 100) + '%', backgroundColor: evt.color }"
+                ></div>
+              </el-tooltip>
             </div>
           </div>
         </div>
@@ -74,7 +72,7 @@
       <div class="replay-content">
         <div class="map-wrapper">
           <div id="map" class="map-container"></div>
-          
+
           <!-- 实时存活统计遮罩 -->
           <div class="match-stats-overlay" v-if="!loading">
             <div class="stat-item">
@@ -86,7 +84,7 @@
               <span class="value">{{ alivePlayers.length }}</span>
             </div>
           </div>
-          
+
           <div class="zoom-control" v-if="mapInstance">
             <el-icon class="zoom-icon" @click="changeZoom(0.5)"><Plus /></el-icon>
             <el-slider
@@ -110,35 +108,35 @@
                :style="{ top: hoveredPlayerTop + 'px' }">
             <div class="equip-section gear">
               <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.helmet]">
-                <img v-if="playersState[hoveredPlayer].items.helmet" 
+                <img v-if="playersState[hoveredPlayer].items.helmet"
                      :src="getItemImagePath(playersState[hoveredPlayer].items.helmet)"
-                     @error="(e: any) => e.target.style.display='none'" />
+                     @error="handleImageError" />
                 <div class="empty-slot">头</div>
               </div>
               <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.vest]">
-                <img v-if="playersState[hoveredPlayer].items.vest" 
+                <img v-if="playersState[hoveredPlayer].items.vest"
                      :src="getItemImagePath(playersState[hoveredPlayer].items.vest)"
-                     @error="(e: any) => e.target.style.display='none'" />
+                     @error="handleImageError" />
                 <div class="empty-slot">甲</div>
               </div>
               <div class="equip-slot" :title="itemNames[playersState[hoveredPlayer].items.backpack]">
-                <img v-if="playersState[hoveredPlayer].items.backpack" 
+                <img v-if="playersState[hoveredPlayer].items.backpack"
                      :src="getItemImagePath(playersState[hoveredPlayer].items.backpack)"
-                     @error="(e: any) => e.target.style.display='none'" />
+                     @error="handleImageError" />
                 <div class="empty-slot">包</div>
               </div>
             </div>
             <div class="equip-section weapons">
               <div class="equip-slot weapon" :title="getWeaponTitle(playersState[hoveredPlayer].items.weapon1, hoveredPlayer)">
-                <img v-if="playersState[hoveredPlayer].items.weapon1" 
+                <img v-if="playersState[hoveredPlayer].items.weapon1"
                      :src="getItemImagePath(playersState[hoveredPlayer].items.weapon1)"
-                     @error="(e: any) => e.target.style.display='none'" />
+                     @error="handleImageError" />
                 <div class="empty-slot">1</div>
               </div>
               <div class="equip-slot weapon" :title="getWeaponTitle(playersState[hoveredPlayer].items.weapon2, hoveredPlayer)">
-                <img v-if="playersState[hoveredPlayer].items.weapon2" 
+                <img v-if="playersState[hoveredPlayer].items.weapon2"
                      :src="getItemImagePath(playersState[hoveredPlayer].items.weapon2)"
-                     @error="(e: any) => e.target.style.display='none'" />
+                     @error="handleImageError" />
                 <div class="empty-slot">2</div>
               </div>
             </div>
@@ -228,7 +226,7 @@
 import { ref, onMounted, onUnmounted, computed, nextTick, watch, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getMatchTelemetry, getMatchDetails } from '../api/player'
-import { ArrowLeft, VideoPlay, VideoPause, Aim, Warning, FirstAidKit, Lightning, Plus, Minus, Search, Timer, Calendar, Share } from '@element-plus/icons-vue'
+import { ArrowLeft, VideoPlay, VideoPause, Aim, Warning, FirstAidKit, Lightning, Plus, Minus, Search, Calendar, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -254,7 +252,7 @@ const match = ref<any>(null)
 const telemetry = ref<any[]>([])
 // 非响应式存储，避免深度代理导致的巨额内存开销
 let rawTelemetry: any[] = []
-let playerTimelines: Record<string, any[]> = {} 
+let playerTimelines: Record<string, any[]> = {}
 let airdropData: Record<string, { spawnTime: number, landTime: number, spawnPos: any, landPos: any, items: string[] }> = {}
 const itemNames = ref<Record<string, string>>({}) // itemId.json 映射
 let eventTimestamps: number[] = [] // 预计算的时间戳
@@ -283,12 +281,11 @@ let safeZoneLayer: L.Circle | null = null
 let redZoneLayer: L.Circle | null = null
 let airdropMarkers: Record<string, L.Marker> = {}
 let airdropPredictionCircles: Record<string, L.Circle> = {}
-let flightPathLayer: L.Polyline | null = null
 
 // 地图数据状态
 // 核心优化：playersState 仅用于 UI 响应，内部逻辑使用原始对象 playersData 提速
 const playersState = ref<Record<string, any>>({})
-let playersData: Record<string, any> = {} 
+let playersData: Record<string, any> = {}
 const killFeed = ref<any[]>([])
 const zones = ref({
   safeZone: { x: 0, y: 0, radius: 0 },
@@ -303,13 +300,13 @@ const currentPlayerStats = ref({ rank: 0, kills: 0 })
 // 计算当前玩家的关键对局事件，用于在进度条展示
 const playerEvents = computed(() => {
   if (!targetPlayer.value || !rawTelemetry || rawTelemetry.length === 0) return []
-  
+
   const startTime = new Date(rawTelemetry[0]._D).getTime()
   const events: any[] = []
-  
-  rawTelemetry.forEach((event, idx) => {
+
+  rawTelemetry.forEach((event) => {
     const time = (new Date(event._D).getTime() - startTime) / 1000
-    
+
     // 击杀/淘汰
     if (event._T === 'LogPlayerKillV2') {
       if (event.killer?.name === targetPlayer.value) {
@@ -327,7 +324,7 @@ const playerEvents = computed(() => {
       }
     }
   })
-  
+
   return events
 })
 
@@ -343,27 +340,6 @@ const MAP_SIZES: Record<string, number> = {
   'Tiger_Main': 8192,
   'Kiki_Main': 8192,
   'Neon_Main': 8192,
-}
-
-const PUB_MAP_NAME_MAPPING: Record<string, string> = {
-  'Baltic_Main': 'erangel',
-  'Erangel_Main': 'erangel',
-  'Desert_Main': 'miramar',
-  'Savage_Main': 'sanhok',
-  'DihorOtok_Main': 'vikendi',
-  'Chimera_Main': 'paramo',
-  'Summerland_Main': 'karakin',
-  'Heaven_Main': 'haven',
-  'Tiger_Main': 'taego',
-  'Kiki_Main': 'deston',
-  'Neon_Main': 'rondo',
-}
-
-// 坐标转换：PUBG 原始坐标 -> Leaflet 坐标
-// PUBG 坐标通常是 0-816000，但瓦片系统基于地图像素
-const pubgToLeaflet = (val: number, mapSize: number) => {
-  // PUBG 官方坐标通常缩放比例 (816000 -> 8192px)
-  return (val / 100)
 }
 
 const initMap = () => {
@@ -394,14 +370,14 @@ const initMap = () => {
   // 2. 创建地图实例
   mapInstance = L.map('map', {
     crs: L.CRS.Simple,
-    preferCanvas: true, 
-    minZoom: -5, 
+    preferCanvas: true,
+    minZoom: -5,
     maxZoom: 4,
     zoomSnap: 0, // 允许分级缩放，确保完美适配边界
     zoomControl: false,
     attributionControl: false,
-    maxBounds: bounds, 
-    maxBoundsViscosity: 1.0 
+    maxBounds: bounds,
+    maxBoundsViscosity: 1.0
   })
 
   // 监听交互，自动断开跟随
@@ -420,12 +396,12 @@ const initMap = () => {
         mapInstance.invalidateSize()
         // 强制计算一个能够填满容器的最小缩放
         const calculatedMinZoom = mapInstance.getBoundsZoom(bounds, true)
-        
+
         mapInstance.setMinZoom(calculatedMinZoom)
         // 使用 setView 直接定位中心和精确缩放，避免 fitBounds 的舍入误差
         mapInstance.setView([-mapSize / 2, mapSize / 2], calculatedMinZoom, { animate: false })
         mapInstance.setMaxBounds(bounds)
-        
+
         minZoom.value = calculatedMinZoom
         currentZoom.value = calculatedMinZoom
       }
@@ -447,13 +423,13 @@ const initMap = () => {
   // 6. 渲染航线
   if (flightPath.value.length >= 2) {
     const points = flightPath.value.map(p => [-(p.y / 100), p.x / 100] as L.LatLngExpression)
-    flightPathLayer = L.polyline(points, { color: 'white', weight: 2, dashArray: '10, 10', opacity: 0.5 }).addTo(mapInstance)
+    L.polyline(points, { color: 'white', weight: 2, dashArray: '10, 10', opacity: 0.5 }).addTo(mapInstance)
   }
 }
 
 const updateMarkers = () => {
   if (!mapInstance || !mapInstance.getContainer()) return
-  
+
   // 核心修复：确保地图已经初始化了中心点和缩放级别，否则 Leaflet 在计算 Tooltip 偏移时会抛出 subtract of undefined 错误
   try {
     if (!mapInstance.getCenter()) return
@@ -511,7 +487,7 @@ const updateMarkers = () => {
       playerMarkers[p.name] = marker
     } else {
       marker.setLatLng([lat, lng])
-      
+
       marker.setStyle({
         color: isFocused ? '#fff' : '#000',
         weight: isFocused ? 2 : 1,
@@ -531,11 +507,11 @@ const updateMarkers = () => {
     }
 
     if (isFocused) {
-      const fov = 45 
-      const length = 60 
+      const fov = 45
+      const length = 60
       const yaw = smoothState.yaw - 90
       const points: [number, number][] = [[lat, lng]]
-      const step = 5 
+      const step = 5
       for (let i = -fov / 2; i <= fov / 2; i += step) {
         const rad = (yaw + i) * Math.PI / 180
         points.push([lat + Math.sin(rad) * length, lng + Math.cos(rad) * length])
@@ -546,7 +522,7 @@ const updateMarkers = () => {
         focusedViewLayer.setLatLngs(points)
       }
     }
-    
+
     const attackElapsed = (p.lastAttackTime - (eventTimestamps[0] || 0)) / 1000
     const isFiring = time > attackElapsed && time < attackElapsed + 0.15
     if (isFiring) {
@@ -606,7 +582,7 @@ const updateMarkers = () => {
   // 更新空投
   const currentAirdrops = Object.entries(airdropData).filter(([_, data]) => time >= data.spawnTime)
   const currentAirdropIds = new Set(currentAirdrops.map(([id]) => id))
-  
+
   Object.keys(airdropMarkers).forEach(id => {
     if (!currentAirdropIds.has(id)) {
       const marker = airdropMarkers[id]
@@ -618,7 +594,7 @@ const updateMarkers = () => {
   currentAirdrops.forEach(([id, data]) => {
     const isLanded = time >= data.landTime
     let lat, lng
-    
+
     if (isLanded && data.landPos) {
       lat = -(data.landPos.y / 100)
       lng = data.landPos.x / 100
@@ -634,17 +610,17 @@ const updateMarkers = () => {
 
     const existingMarker = airdropMarkers[id]
     if (!existingMarker) {
-      const airdropIcon = L.divIcon({ 
+      const airdropIcon = L.divIcon({
         html: `<div class="airdrop-marker ${isLanded ? 'landed' : 'dropping'}">
                 <div class="airdrop-box">🎁</div>
                 ${!isLanded ? '<div class="parachute"></div>' : ''}
-               </div>`, 
-        className: 'custom-div-icon', 
-        iconSize: [30, 30], 
-        iconAnchor: [15, 15] 
+               </div>`,
+        className: 'custom-div-icon',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
       })
       airdropMarkers[id] = L.marker([lat, lng], { icon: airdropIcon, zIndexOffset: 1000 }).addTo(mapInstance!)
-      
+
       // 绑定空投物品悬浮窗
       if (data.items && data.items.length > 0) {
         const itemsHtml = data.items.map(itemId => `
@@ -653,7 +629,7 @@ const updateMarkers = () => {
             <span>${itemNames.value[itemId] || formatWeaponName(itemId)}</span>
           </div>
         `).join('')
-        
+
         airdropMarkers[id].bindTooltip(`
           <div class="airdrop-tooltip-content">
             <div class="tooltip-title">空投物品</div>
@@ -666,7 +642,7 @@ const updateMarkers = () => {
           sticky: true
         })
       }
-      
+
       // 如果还没落地，在地面渲染一个落点标记
       if (!isLanded && data.landPos && !airdropPredictionCircles[id]) {
         airdropPredictionCircles[id] = L.circle([-(data.landPos.y / 100), data.landPos.x / 100], {
@@ -680,7 +656,7 @@ const updateMarkers = () => {
       }
     } else {
       existingMarker.setLatLng([lat, lng])
-      
+
       // 如果已落地，且预告圈还存在，则移除
       if (isLanded && airdropPredictionCircles[id]) {
         const circle = airdropPredictionCircles[id]
@@ -694,11 +670,11 @@ const updateMarkers = () => {
       const currentIcon = existingMarker.options.icon as L.DivIcon
       const currentHtml = (currentIcon?.options?.html as string) || ''
       if (isLanded && !currentHtml.includes('landed')) {
-        const landedIcon = L.divIcon({ 
-          html: `<div class="airdrop-marker landed"><div class="airdrop-box">🎁</div></div>`, 
-          className: 'custom-div-icon', 
-          iconSize: [30, 30], 
-          iconAnchor: [15, 15] 
+        const landedIcon = L.divIcon({
+          html: `<div class="airdrop-marker landed"><div class="airdrop-box">🎁</div></div>`,
+          className: 'custom-div-icon',
+          iconSize: [30, 30],
+          iconAnchor: [15, 15]
         })
         existingMarker.setIcon(landedIcon)
       }
@@ -722,7 +698,6 @@ const handleMouseLeave = () => {
 }
 
 // 模拟玩家颜色
-const playerColors: Record<string, string> = {}
 const getPlayerColor = (player: any): string => {
   if (!focusedPlayer.value || !playersState.value[focusedPlayer.value]) {
     return player.isBot ? '#666666' : '#ffffff'
@@ -765,7 +740,7 @@ const groupedPlayers = computed(() => {
   Object.values(playersState.value).forEach(p => {
     void p.isAlive // 建立响应式追踪
   })
-  
+
   const groups: Record<number, any[]> = {}
   Object.values(playersState.value).forEach(p => {
     const teamId = p.teamId || 0
@@ -788,7 +763,7 @@ const formatTime = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-const getWeaponTitle = (weaponId: string, playerName: string) => {
+const getWeaponTitle = (weaponId: string, _playerName: string) => {
   if (!weaponId) return '无武器'
   const normId = getNormalizedItemId(weaponId)
   return itemNames.value[normId] || WEAPON_NAME_DICT[normId] || normId
@@ -881,6 +856,10 @@ const getItemImagePath = (itemId: string) => {
   return ''
 }
 
+const handleImageError = (e: any) => {
+  e.target.style.display = 'none'
+}
+
 const fetchData = async () => {
   if (!matchId.value) {
     console.error('fetchData called without matchId')
@@ -897,11 +876,11 @@ const fetchData = async () => {
     lastProcessedTime = -1
     currentEventIndex = 0
     currentTime.value = 0
-    
+
     const mId = matchId.value
     const pName = targetPlayer.value
     console.log(`Fetching match data - MatchID: ${mId}, Player: ${pName}`)
-    
+
     isPlaying.value = false // 加载新数据前强制暂停
     if (!mId || mId === 'undefined') {
       throw new Error('未提供有效的 Match ID')
@@ -914,13 +893,13 @@ const fetchData = async () => {
         .then(res => res.ok ? res.json() : {})
         .catch(() => ({}))
     ])
-    
+
     if (!telemetryData || !Array.isArray(telemetryData)) {
       throw new Error('遥测数据格式不正确或为空')
     }
 
     match.value = matchData
-    
+
     // 获取当前玩家的汇总数据
     if (targetPlayer.value && matchData.participants) {
       const p = matchData.participants.find((it: any) => it.name === targetPlayer.value)
@@ -968,7 +947,7 @@ const fetchData = async () => {
       // 提取航线 (改进共识算法：降低门槛，确保 100% 成功提取且保持高精度)
       const timeGroupedPoints: Record<number, {x: number, y: number}[]> = {}
       const firstTs = eventTimestamps[0] || 0
-      
+
       rawTelemetry.forEach((e, idx) => {
         if (e._T === 'LogPlayerPosition' && e.character.location.z > 10000) {
           const ts = eventTimestamps[idx]
@@ -993,7 +972,7 @@ const fetchData = async () => {
           const key = `${Math.floor(p.x / 10) * 10},${Math.floor(p.y / 10) * 10}`
           counts[key] = (counts[key] || 0) + 1
         })
-        
+
         let maxCount = 0
         let bestPos = { x: 0, y: 0 }
         for (const key in counts) {
@@ -1004,7 +983,7 @@ const fetchData = async () => {
             bestPos = { x: Number(parts[0]) || 0, y: Number(parts[1]) || 0 }
           }
         }
-        
+
         // 阈值下调：只要有 2 人坐标一致即认定为飞机，确保即便在人少的对局也能提取航线
         if (maxCount >= 2) {
           consensusPoints.push({ ...bestPos, t: ts })
@@ -1023,7 +1002,7 @@ const fetchData = async () => {
           const mapName = match.value.mapName
           const mapSize = MAP_SIZES[mapName] || 8192
           const limit = mapSize * 100 // PUBG 坐标系上限
-          
+
           const tValues: number[] = []
           // 计算直线 P = start + t * (end - start) 与四条边界的交点参数 t
           if (Math.abs(dx) > 0.1) {
@@ -1034,7 +1013,7 @@ const fetchData = async () => {
             tValues.push((0 - start.y) / dy)
             tValues.push((limit - start.y) / dy)
           }
-          
+
           // 过滤掉不在地图范围内的交点（允许 1% 浮点误差），并排序
           const margin = limit * 0.01
           const validTs = tValues
@@ -1049,7 +1028,7 @@ const fetchData = async () => {
             // 取最小和最大的 t，即为穿过地图的进入点和离开点
             const tEntry = validTs[0]!
             const tExit = validTs[validTs.length - 1]!
-            
+
             flightPath.value = [
               { x: start.x + tEntry * dx, y: start.y + tEntry * dy },
               { x: start.x + tExit * dx, y: start.y + tExit * dy }
@@ -1061,7 +1040,7 @@ const fetchData = async () => {
 
     // 将地图和玩家初始化放入 nextTick，确保 DOM 已渲染且不阻塞主线程
     await nextTick()
-    
+
     initMap()
     initPlayers()
 
@@ -1077,7 +1056,7 @@ const fetchData = async () => {
       updateState(currentTime.value)
       updateMarkers()
     }
-    
+
     // 强制触发一次 UI 状态更新，确保统计数据立即显示
     playersState.value = { ...playersData }
   } catch (err: any) {
@@ -1095,7 +1074,7 @@ const preprocessAirdrops = () => {
   airdropData = {}
   const firstTimestamp = eventTimestamps[0] || 0
   let foundCount = 0
-  
+
   rawTelemetry.forEach((event, index) => {
     const ts = eventTimestamps[index]
     if (ts === undefined) return
@@ -1105,7 +1084,7 @@ const preprocessAirdrops = () => {
       foundCount++
       const id = event.itemPackage?.itemPackageId
       if (!id) return
-      
+
       // 直接从 Spawn 事件中提取初始物品清单
       const initialItems = (event.itemPackage.items || []).map((item: any) => item.itemId)
 
@@ -1180,7 +1159,7 @@ const getInterpolatedPlayerState = (playerName: string, time: number) => {
 
   const prev = timeline[prevIdx]
   const next = timeline[nextIdx]
-  
+
   if (next.time === prev.time) return prev
 
   // 在正式比赛（登机）开始前，锁定在出生岛位置
@@ -1193,7 +1172,7 @@ const getInterpolatedPlayerState = (playerName: string, time: number) => {
   }
 
   const ratio = (time - prev.time) / (next.time - prev.time)
-  
+
   // 角度插值优化：处理 0/360 度跨越问题，实现最短路径旋转
   let deltaYaw = next.yaw - prev.yaw
   if (deltaYaw > 180) deltaYaw -= 360
@@ -1260,8 +1239,8 @@ const updateState = (time: number) => {
     if (eventTime === undefined || eventTime > targetTime) break
 
     const event = rawTelemetry[currentEventIndex]
-    const p = event.character ? playersData[event.character.name] : 
-              event.attacker ? playersData[event.attacker.name] : 
+    const p = event.character ? playersData[event.character.name] :
+              event.attacker ? playersData[event.attacker.name] :
               event.victim ? playersData[event.victim.name] : null
 
     switch (event._T) {
@@ -1272,19 +1251,19 @@ const updateState = (time: number) => {
           if (!p.isAlive && (event.character.location.z > 10000 || p.hp > 0)) {
             p.isAlive = true
             if (event.character.location.z > 10000) {
-              killFeed.value.unshift({ 
-                killer: p.name, 
+              killFeed.value.unshift({
+                killer: p.name,
                 killerTeamId: p.teamId,
-                victim: '', 
-                action: '重新进入了战场', 
-                isRespawn: true, 
-                time: eventTime 
+                victim: '',
+                action: '重新进入了战场',
+                isRespawn: true,
+                time: eventTime
               })
             }
           }
         }
         break
-      case 'LogPlayerAttack': 
+      case 'LogPlayerAttack':
         if (p) {
           p.lastAttackTime = eventTime
           // 兜底逻辑：开火时更新手持武器
@@ -1302,14 +1281,14 @@ const updateState = (time: number) => {
         if (killerG) killerG.dbnos++
         if (event.victim) {
           const victimG = playersData[event.victim.name]
-          killFeed.value.unshift({ 
-            killer: event.attacker?.name || 'Unknown', 
+          killFeed.value.unshift({
+            killer: event.attacker?.name || 'Unknown',
             killerTeamId: killerG?.teamId,
-            victim: event.victim.name, 
+            victim: event.victim.name,
             victimTeamId: victimG?.teamId,
-            action: '击倒了', 
-            isGroggy: true, 
-            time: eventTime 
+            action: '击倒了',
+            isGroggy: true,
+            time: eventTime
           })
         }
         break
@@ -1319,14 +1298,14 @@ const updateState = (time: number) => {
         const victimR = event.victim ? playersData[event.victim.name] : null
         if (victimR) {
           victimR.isAlive = true; victimR.hp = event.victim.health || 20
-          killFeed.value.unshift({ 
-            killer: event.reviver?.name || 'Unknown', 
+          killFeed.value.unshift({
+            killer: event.reviver?.name || 'Unknown',
             killerTeamId: reviver?.teamId,
-            victim: event.victim.name, 
+            victim: event.victim.name,
             victimTeamId: victimR?.teamId,
-            action: '扶起了', 
-            isRevive: true, 
-            time: eventTime 
+            action: '扶起了',
+            isRevive: true,
+            time: eventTime
           })
         }
         break
@@ -1336,13 +1315,13 @@ const updateState = (time: number) => {
         const victimK = event.victim ? playersData[event.victim.name] : null
         if (victimK) {
           victimK.isAlive = false; victimK.hp = 0
-          killFeed.value.unshift({ 
-            killer: event.killer?.name || 'Suicide', 
+          killFeed.value.unshift({
+            killer: event.killer?.name || 'Suicide',
             killerTeamId: killerK?.teamId,
-            victim: event.victim.name, 
+            victim: event.victim.name,
             victimTeamId: victimK?.teamId,
-            action: '淘汰了', 
-            time: eventTime 
+            action: '淘汰了',
+            time: eventTime
           })
         }
         break
@@ -1383,7 +1362,7 @@ const updateState = (time: number) => {
             else if (id.startsWith('Item_Weapon')) {
               const normId = getNormalizedItemId(id)
               const cat = WEAPON_CATEGORIES[normId] || 'main'
-              
+
               if (cat === 'handgun') {
                 itemP.items.weapon3 = id
               } else if (cat === 'melee' || cat === 'throwable') {
@@ -1400,7 +1379,7 @@ const updateState = (time: number) => {
                   itemP.items.weapon2 = id
                 }
               }
-              
+
               // Debug 日志：过滤掉干扰道具，仅打印核心武器
               if (cat === 'main' && (itemP.name === hoveredPlayer.value || itemP.name === focusedPlayer.value)) {
                 console.log(`[Weapon Debug] ${itemP.name} 核心武器变动: ${id} -> 槽位1: ${itemP.items.weapon1}, 槽位2: ${itemP.items.weapon2}`)
@@ -1437,15 +1416,15 @@ function playbackLoop(now: number) {
       updateMarkers()
     } catch (e) {
       console.error('Playback loop error:', e)
-      isPlaying.value = false 
+      isPlaying.value = false
     }
   }
 
   playbackTimer = requestAnimationFrame(playbackLoop)
 }
 
-const togglePlay = () => { 
-  isPlaying.value = !isPlaying.value 
+const togglePlay = () => {
+  isPlaying.value = !isPlaying.value
 }
 const resetPlayback = () => { isPlaying.value = false; currentTime.value = 0; initPlayers(); }
 const onSliderChange = (val: number) => { currentTime.value = val; updateState(val); updateMarkers(); }
@@ -1482,7 +1461,7 @@ const formatWeaponName = (name: string) => WEAPON_NAME_DICT[name] || name.replac
 
 const focusPlayer = (name: string) => {
   focusedPlayer.value = name
-  isFollowing.value = true 
+  isFollowing.value = true
   const p = playersData[name]
   if (p && mapInstance) {
     // 核心优化：如果当前是全景模式，点击聚焦时自动放大一级，以便开启视角跟踪
@@ -1502,7 +1481,7 @@ const scrollToPlayer = (name: string) => {
   })
 }
 
-const handleEsc = (e: KeyboardEvent) => { 
+const handleEsc = (e: KeyboardEvent) => {
   if (e.key === 'Escape') {
     if (props.isDialog) {
       // 弹窗模式下由父组件处理关闭
@@ -1526,19 +1505,19 @@ const goToPlayer = (name: string) => { window.open(router.resolve(`/player/${nam
 watch(loading, (newLoading) => {
   if (!newLoading && telemetry.value.length > 0) {
     console.log('Replay data loaded, preparing auto-play...')
-    
+
     // 给予 500ms 缓冲，确保地图图层、弹窗动画、以及 initMap 中的 setView 都稳定了再启动
     setTimeout(() => {
       // 1. 自动跳转到比赛开始时刻 (起飞)
       if (matchStartTime.value > 0) {
         currentTime.value = matchStartTime.value
       }
-      
+
       // 同步一次状态，此时 updateMarkers 内部已经有了 getCenter 检查，是安全的
       updateState(currentTime.value)
       updateMarkers()
 
-      lastFrameTime = 0 
+      lastFrameTime = 0
       isPlaying.value = true
       console.log('Replay auto-play engaged')
     }, 500)
@@ -1554,7 +1533,7 @@ watch(matchId, (newId) => {
 
 onMounted(() => {
   window.addEventListener('keydown', handleEsc)
-  
+
   // 统一在组件挂载时启动播放循环管家，它会根据 isPlaying 状态决定是否推进时间
   if (playbackTimer) cancelAnimationFrame(playbackTimer)
   lastFrameTime = 0
@@ -1581,14 +1560,14 @@ onUnmounted(() => {
     padding: 8px !important;
     border-radius: 4px !important;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
-    
+
     &::before {
       border-top-color: rgba(30, 30, 30, 0.95) !important;
     }
 
     .airdrop-tooltip-content {
       min-width: 120px;
-      
+
       .tooltip-title {
         font-size: 12px;
         color: #999;
@@ -1603,7 +1582,7 @@ onUnmounted(() => {
         align-items: center;
         gap: 8px;
         margin-bottom: 4px;
-        
+
         &:last-child { margin-bottom: 0; }
 
         img {
@@ -1627,16 +1606,16 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    
+
     .airdrop-box {
       font-size: 20px;
       line-height: 1;
       filter: drop-shadow(0 0 2px rgba(0,0,0,0.5));
     }
-    
+
     &.dropping {
       animation: drop-swing 2s ease-in-out infinite;
-      
+
       .parachute {
         width: 20px;
         height: 12px;
@@ -1645,7 +1624,7 @@ onUnmounted(() => {
         position: relative;
         margin-bottom: -2px;
         box-shadow: 0 -2px 4px rgba(0,0,0,0.2);
-        
+
         &::after {
           content: '';
           position: absolute;
@@ -1659,7 +1638,7 @@ onUnmounted(() => {
         }
       }
     }
-    
+
     &.landed {
       .airdrop-box {
         animation: land-bounce 0.5s ease-out;
@@ -1671,7 +1650,7 @@ onUnmounted(() => {
     0%, 100% { transform: rotate(-5deg); }
     50% { transform: rotate(5deg); }
   }
-  
+
   @keyframes land-bounce {
     0% { transform: scale(1.2); }
     50% { transform: scale(0.9); }
@@ -1707,7 +1686,7 @@ onUnmounted(() => {
     height: 94vh;
     background-color: transparent; // 弹窗模式背景透明，依靠内部布局背景
   }
-  
+
   height: 100vh;
   width: 100%;
   display: flex;
@@ -1779,12 +1758,12 @@ onUnmounted(() => {
             transition: transform 0.2s, color 0.2s;
             display: flex;
             align-items: center;
-            
+
             &:hover {
               transform: scale(1.2);
               color: #66b1ff;
             }
-            
+
             &:active {
               transform: scale(0.9);
             }
@@ -1856,7 +1835,7 @@ onUnmounted(() => {
       display: flex;
       flex-direction: column; // 改为上下结构，时间在滑块上方
       gap: 2px;
-            
+
       .time-display {
         display: flex;
         align-items: center;
@@ -1867,7 +1846,7 @@ onUnmounted(() => {
         .current { color: #409eff; font-weight: bold; }
         .divider { margin: 0 4px; opacity: 0.5; }
       }
-    
+
       .slider-wrapper {
         flex: 1;
         position: relative;
@@ -1920,7 +1899,7 @@ onUnmounted(() => {
       font-size: 12px;
       color: #999;
       white-space: nowrap;
-        
+
       :deep(.el-input__inner) {
         background: rgba(0,0,0,0.2);
         border-color: #444;
@@ -1936,7 +1915,7 @@ onUnmounted(() => {
   overflow: hidden;
   background-color: #000;
   // 高度由地图决定
-  height: calc(min(1024px, 94vh - 70px)); 
+  height: calc(min(1024px, 94vh - 70px));
 }
 
 .map-wrapper {
@@ -1949,7 +1928,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0; 
+  flex-shrink: 0;
 }
 
 .match-stats-overlay {
@@ -2283,7 +2262,7 @@ onUnmounted(() => {
     flex-shrink: 0;
   }
 
-  .killer { color: #67c23a; font-weight: bold; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; } 
+  .killer { color: #67c23a; font-weight: bold; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
   .victim { color: #eee; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
   .action { margin: 0 4px; color: #888; flex-shrink: 0; }
 
@@ -2294,13 +2273,13 @@ onUnmounted(() => {
     font-style: italic;
     opacity: 0.8;
   }
-  
+
   &.is-groggy {
-    .action { color: #e6a23c; } 
+    .action { color: #e6a23c; }
   }
 
   &.is-revive {
-    .action { color: #67c23a; } 
+    .action { color: #67c23a; }
   }
 
   &.is-respawn {

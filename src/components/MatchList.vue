@@ -171,11 +171,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, nextTick, defineAsyncComponent } from 'vue'
 import type { PlayerMatchResponse } from '../types'
 import { ArrowDown, Timer, Aim, FirstAidKit } from '@element-plus/icons-vue'
-import Replay from '../views/Replay.vue'
+const Replay = defineAsyncComponent(() => import('../views/Replay.vue'))
 import {
   MAP_NAME_DICT,
   GAME_MODE_DICT,

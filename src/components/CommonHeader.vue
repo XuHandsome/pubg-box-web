@@ -85,7 +85,7 @@ onMounted(() => {
   applyTheme(theme.value)
 
   // 监听系统主题变化
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     if (theme.value === 'system') {
       applyTheme('system')
     }
