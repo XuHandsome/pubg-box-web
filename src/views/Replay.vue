@@ -154,7 +154,7 @@
           </div>
 
           <div class="player-list">
-            <div class="section-title">玩家与战绩统计 ({{ alivePlayers.length }} 存活)</div>
+            <div class="section-title">玩家与战绩统计</div>
             <el-scrollbar height="100%">
               <div v-for="(team, teamId) in groupedPlayers" :key="teamId" :id="`team-${teamId}`" class="team-group">
                 <div class="team-header">
@@ -2042,7 +2042,7 @@ onUnmounted(() => {
   .player-list {
     flex: 6; // 占 6 份高度
     overflow: hidden;
-    padding: 15px; 
+    padding: 30px 15px 15px 15px; // 增加顶部内边距，离进度条远一点
   }
 
   .kill-feed {

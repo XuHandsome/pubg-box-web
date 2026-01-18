@@ -33,7 +33,15 @@
       </div>
 
       <div class="actions">
-        <el-button type="primary" :icon="Refresh" @click="$emit('refresh')">更新战绩</el-button>
+        <el-button 
+          type="primary" 
+          :icon="Refresh" 
+          :loading="loading" 
+          :disabled="loading || (cooldown !== undefined && cooldown > 0)"
+          @click="$emit('refresh')"
+        >
+          {{ cooldown && cooldown > 0 ? `请稍等 (${cooldown}s)` : '更新战绩' }}
+        </el-button>
       </div>
     </div>
   </el-card>
@@ -65,6 +73,8 @@ use([
 const props = defineProps<{
   player: PlayerResponse | null
   matches: PlayerMatchResponse[]
+  loading?: boolean
+  cooldown?: number
 }>()
 
 defineEmits(['refresh'])

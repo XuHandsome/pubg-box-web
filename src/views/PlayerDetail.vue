@@ -4,17 +4,20 @@
       <PlayerHeader
         :player="player"
         :matches="matches"
+        :loading="loadingPlayer"
+        :cooldown="syncCooldown"
         @refresh="handleRefresh"
       />
 
-      <!-- <div class="sync-hint" v-if="player">
+      <div class="sync-hint" v-if="showSyncHint && player">
         <el-alert
-          title="后台正在同步最近对局，请稍后刷新查看完整战绩。"
-          type="info"
-          :closable="false"
+          title="同步请求已发送！后台正在抓取最近对局详情，由于 API 限制，完整战绩可能需要 10-30 秒同步完成，请稍后刷新查看。"
+          type="success"
+          :closable="true"
           show-icon
+          @close="showSyncHint = false"
         />
-      </div> -->
+      </div>
 
       <!-- 筛选与排序工具栏 -->
       <div class="filter-toolbar" v-if="player">
@@ -84,6 +87,9 @@ const player = ref<PlayerResponse | null>(null)
 const matches = ref<PlayerMatchResponse[]>([])
 const loadingPlayer = ref(false)
 const loadingMatches = ref(false)
+const showSyncHint = ref(false)
+const syncCooldown = ref(0)
+let cooldownTimer: any = null
 
 // 分页状态
 const currentPage = ref(1)
@@ -149,8 +155,23 @@ const fetchData = async (name: string) => {
 }
 
 const handleRefresh = () => {
+  if (syncCooldown.value > 0) return
+  
   currentPage.value = 1
+  showSyncHint.value = true
   fetchData(route.params.name as string)
+  ElMessage.success('已触发同步，后台正在努力更新中...')
+  
+  // 启动 60 秒冷却倒计时
+  syncCooldown.value = 60
+  if (cooldownTimer) clearInterval(cooldownTimer)
+  cooldownTimer = setInterval(() => {
+    if (syncCooldown.value > 0) {
+      syncCooldown.value--
+    } else {
+      clearInterval(cooldownTimer)
+    }
+  }, 1000)
 }
 
 const handleFilterChange = () => {
