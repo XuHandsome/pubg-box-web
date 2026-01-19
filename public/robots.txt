@@ -1,0 +1,9 @@
+# 允许所有搜索引擎爬虫
+User-agent: *
+Allow: /
+
+# 禁止爬取 API 接口
+Disallow: /api/
+
+# Sitemap 位置
+Sitemap: https://pubg.ohops.org/sitemap.xml
