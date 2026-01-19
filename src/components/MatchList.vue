@@ -3,7 +3,7 @@
     <div v-if="loading" class="loading-box">
       <el-skeleton :rows="5" animated />
     </div>
-    <div v-else-if="matches.length === 0" class="empty-box">
+    <div v-else-if="!matches || matches.length === 0" class="empty-box">
       暂无战绩数据，后台可能正在同步中...
     </div>
     <div v-else>

@@ -33,10 +33,10 @@
       </div>
 
       <div class="actions">
-        <el-button 
-          type="primary" 
-          :icon="Refresh" 
-          :loading="loading" 
+        <el-button
+          type="primary"
+          :icon="Refresh"
+          :loading="loading"
           :disabled="loading || (cooldown !== undefined && cooldown > 0)"
           @click="$emit('refresh')"
         >
@@ -112,7 +112,8 @@ const avgDamage = computed(() => {
 
 // 图表配置
 const chartOption = computed(() => {
-  // 取最近 10 场对局展示趋势（按照时间顺序）
+  if (!props.matches) return {}
+  // 取最近 15 场对局展示趋势（按照时间顺序）
   const chartData = [...props.matches].slice(0, 15).reverse()
 
   return {
@@ -136,7 +137,7 @@ const chartOption = computed(() => {
       right: '12%',
       bottom: '3%',
       top: '30%',
-      containLabel: true
+      outerBounds: {}
     },
     xAxis: {
       type: 'category',

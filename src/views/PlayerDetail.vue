@@ -51,7 +51,7 @@
       <MatchList
         :matches="matches"
         :loading="loadingMatches"
-        :current-player-name="(route.params.name as string)"
+        :current-player-name="String(route.params.name)"
       />
 
       <!-- 分页组件 -->
@@ -72,12 +72,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, reactive } from 'vue'
+import { ref, onMounted, watch, reactive, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import { getPlayerInfo, getPlayerMatches } from '../api/player'
 import type { PlayerResponse, PlayerMatchResponse, MatchFilter } from '../types'
-import PlayerHeader from '../components/PlayerHeader.vue'
-import MatchList from '../components/MatchList.vue'
+const PlayerHeader = defineAsyncComponent(() => import('../components/PlayerHeader.vue'))
+const MatchList = defineAsyncComponent(() => import('../components/MatchList.vue'))
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
@@ -143,8 +143,14 @@ const fetchData = async (name: string) => {
     if (params.won === false) params.won = undefined // Checkbox null/false 处理
 
     const matchData = await getPlayerMatches(name, pageSize.value, offset, params)
-    matches.value = matchData.matches
-    totalMatches.value = matchData.total
+    if (matchData && Array.isArray(matchData.matches)) {
+      matches.value = matchData.matches
+      totalMatches.value = matchData.total || 0
+    } else {
+      console.error('Invalid match data structure:', matchData)
+      matches.value = []
+      totalMatches.value = 0
+    }
   } catch (err: any) {
     console.error('Fetch data error:', err)
     ElMessage.error(err.response?.data?.message || err.message || '获取数据失败')
@@ -156,12 +162,12 @@ const fetchData = async (name: string) => {
 
 const handleRefresh = () => {
   if (syncCooldown.value > 0) return
-  
+
   currentPage.value = 1
   showSyncHint.value = true
   fetchData(route.params.name as string)
   ElMessage.success('已触发同步，后台正在努力更新中...')
-  
+
   // 启动 60 秒冷却倒计时
   syncCooldown.value = 60
   if (cooldownTimer) clearInterval(cooldownTimer)

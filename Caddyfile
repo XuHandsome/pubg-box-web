@@ -1,14 +1,22 @@
 :80 {
-    # 静态文件根目录
+    log {
+        output stdout
+        format json
+    }
+
     root * /usr/share/caddy
-    file_server
 
-    # 处理 Vue/SPA 路由，将所有找不到的文件重定向到 index.html
-    try_files {path} /index.html
-
-    # 反向代理 API 请求
-    # 使用环境变量 BACKEND_ADDR，例如 http://backend:8080/v1
+    # 1. 优先处理 API 转发 (强制以 /api 开头)
     handle_path /api/* {
-        reverse_proxy {$BACKEND_ADDR}
+        rewrite * /v1{path}
+        reverse_proxy {$BACKEND_ADDR} {
+            header_up Host {upstream_hostport}
+        }
+    }
+
+    # 2. 兜底处理：静态资源和 SPA 路由
+    handle {
+        try_files {path} /index.html
+        file_server
     }
 }

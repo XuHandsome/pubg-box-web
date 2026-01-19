@@ -1492,11 +1492,44 @@ const handleEsc = (e: KeyboardEvent) => {
 }
 const copyShareLink = () => {
   const url = `${window.location.origin}/replay/${matchId.value}${targetPlayer.value ? '?player=' + targetPlayer.value : ''}`
-  navigator.clipboard.writeText(url).then(() => {
-    ElMessage.success('链接已复制到剪贴板，快去分享吧！')
-  }).catch(() => {
+
+  // 核心修复：处理非安全上下文（非 localhost 且非 HTTPS）下 clipboard API 失效的问题
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(url).then(() => {
+      ElMessage.success('链接已复制到剪贴板，快去分享吧！')
+    }).catch(() => {
+      fallbackCopyTextToClipboard(url)
+    })
+  } else {
+    fallbackCopyTextToClipboard(url)
+  }
+}
+
+// 兜底复制方法：使用传统的 execCommand 方法
+const fallbackCopyTextToClipboard = (text: string) => {
+  const textArea = document.createElement("textarea")
+  textArea.value = text
+  // 确保元素在屏幕外不可见
+  textArea.style.position = "fixed"
+  textArea.style.left = "-9999px"
+  textArea.style.top = "0"
+  document.body.appendChild(textArea)
+  textArea.focus()
+  textArea.select()
+
+  try {
+    const successful = document.execCommand('copy')
+    if (successful) {
+      ElMessage.success('链接已复制到剪贴板！')
+    } else {
+      ElMessage.error('复制失败，请手动复制浏览器地址栏链接')
+    }
+  } catch (err) {
+    console.error('Fallback copy failed:', err)
     ElMessage.error('复制失败，请手动复制浏览器地址栏链接')
-  })
+  }
+
+  document.body.removeChild(textArea)
 }
 
 const goToPlayer = (name: string) => { window.open(router.resolve(`/player/${name}`).href, '_blank') }
