@@ -44,6 +44,9 @@
           </div>
 
           <div class="match-detail-btn">
+            <el-button v-if="aiEnabled" size="small" type="warning" plain :loading="analyzingMatches[match.matchId]" @click="handleAnalyze(match.matchId)">
+              AI 分析
+            </el-button>
             <el-button size="small" type="primary" plain @click="goToReplay(match.matchId)">
               对局回放
             </el-button>
@@ -60,6 +63,21 @@
         <el-collapse-transition>
           <div v-if="expandedMatches[match.matchId]" class="match-detail">
             <el-divider content-position="left">详细战绩</el-divider>
+
+            <!-- AI 分析展示 -->
+            <div v-if="aiAnalyses[match.matchId] || analyzingMatches[match.matchId]" class="ai-analysis-box">
+              <div class="ai-title">
+                <el-icon><MagicStick /></el-icon> AI 战绩分析
+              </div>
+              <div class="ai-content">
+                <div v-if="analyzingMatches[match.matchId] && !aiAnalyses[match.matchId]" class="loading-state">
+                  <el-skeleton :rows="2" animated />
+                </div>
+                <div class="markdown-body" v-html="formatAIAnalysis(aiAnalyses[match.matchId])"></div>
+                <div v-if="analyzingMatches[match.matchId]" class="streaming-cursor"></div>
+              </div>
+            </div>
+
             <div class="detail-grid">
               <!-- 存活信息 -->
               <div class="detail-section">
@@ -173,7 +191,9 @@
 <script setup lang="ts">
 import { ref, nextTick, defineAsyncComponent } from 'vue'
 import type { PlayerMatchResponse } from '../types'
-import { ArrowDown, Timer, Aim, FirstAidKit } from '@element-plus/icons-vue'
+import { ArrowDown, Timer, Aim, FirstAidKit, MagicStick } from '@element-plus/icons-vue'
+import { aiEnabled } from '../utils/features'
+import { ElMessage } from 'element-plus'
 const Replay = defineAsyncComponent(() => import('../views/Replay.vue'))
 import {
   MAP_NAME_DICT,
@@ -191,6 +211,123 @@ const props = defineProps<{
 const expandedMatches = ref<Record<string, boolean>>({})
 const showReplay = ref(false)
 const currentReplayId = ref('')
+const analyzingMatches = ref<Record<string, boolean>>({})
+const aiAnalyses = ref<Record<string, string>>({})
+
+const handleAnalyze = async (matchId: string) => {
+  if (!props.currentPlayerName) {
+    ElMessage.warning('无法获取玩家名称')
+    return
+  }
+
+  // 如果已经有分析结果，则直接展开显示，不再重新调用 API
+  if (aiAnalyses.value[matchId]) {
+    expandedMatches.value[matchId] = true
+    return
+  }
+
+  analyzingMatches.value[matchId] = true
+  aiAnalyses.value[matchId] = '' // 清空旧内容
+  expandedMatches.value[matchId] = true // 自动展开
+
+  try {
+    const url = `/api/matches/${matchId}/analyze?player=${props.currentPlayerName}`
+    const response = await fetch(url)
+
+    if (!response.body) throw new Error('ReadableStream not supported')
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let dataBuffer = ''
+
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      const lines = chunk.split('\n')
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          const content = line.startsWith('data: ') ? line.substring(6) : line.substring(5)
+          dataBuffer += content + '\n'
+        } else if (line === '' && dataBuffer) {
+          aiAnalyses.value[matchId] += dataBuffer.slice(0, -1)
+          dataBuffer = ''
+        }
+      }
+    }
+  } catch (error: any) {
+    console.error('AI analysis failed:', error)
+    ElMessage.error('AI 分析失败，请稍后重试')
+  } finally {
+    analyzingMatches.value[matchId] = false
+  }
+}
+
+const formatAIAnalysis = (text: string | undefined) => {
+  if (!text) return ''
+
+  // 1. 清理
+  let content = text
+    .replace(/```markdown\n?/g, '')
+    .replace(/```\n?/g, '')
+    .replace(/^"|"$/g, '')
+    .trim()
+
+  // 2. 预处理标题
+  content = content.replace(/([^\n])(#{1,6})/g, '$1\n$2')
+
+  const lines = content.split('\n')
+  let html = ''
+  let inList = false
+
+  for (let line of lines) {
+    let l = line.trim()
+    if (!l) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += '<div style="height: 6px"></div>'
+      continue
+    }
+
+    l = l.replace(/\s*#+\s*$/g, '')
+
+    // 处理标题 (兼容没有空格的情况，如 ##1.)
+    const headerMatch = l.match(/^(#{1,6})\s*(.*)/)
+    if (headerMatch && headerMatch[1] && headerMatch[2]) {
+      if (inList) { html += '</ul>'; inList = false; }
+      const level = headerMatch[1].length
+      const title = headerMatch[2].trim()
+      html += `<h${level}>${parseInline(title)}</h${level}>`
+      continue
+    }
+
+    const listMatch = l.match(/^([-*+])\s+(.*)/)
+    if (listMatch && listMatch[2]) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${parseInline(listMatch[2])}</li>`
+      continue
+    }
+
+    if (inList) { html += '</ul>'; inList = false; }
+
+    if (l.startsWith('> ')) {
+      html += `<blockquote>${parseInline(l.replace('> ', ''))}</blockquote>`
+      continue
+    }
+
+    html += `<p>${parseInline(l)}</p>`
+  }
+
+  if (inList) html += '</ul>'
+  return html
+}
+
+const parseInline = (text: string) => {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/---/g, '<hr/>')
+}
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return '-'
@@ -276,6 +413,65 @@ const goToReplay = async (matchId: string) => {
     background-color: var(--el-bg-color-page);
     color: var(--el-text-color-secondary);
   }
+}
+
+.ai-analysis-box {
+  background-color: #fdf6ec;
+  border: 1px solid #faecd8;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+  color: #606266;
+
+  .ai-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: #e6a23c;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ai-content {
+    font-size: 14px;
+    line-height: 1.6;
+    position: relative;
+
+    .markdown-body {
+      :deep(h3) {
+        margin: 12px 0 8px 0;
+        font-size: 15px;
+        color: #303133;
+        font-weight: bold;
+      }
+      :deep(p) { margin: 4px 0; }
+      :deep(strong) { color: #E6A23C; }
+      :deep(li) { margin-left: 18px; list-style-type: disc; }
+      :deep(blockquote) {
+        margin: 8px 0;
+        padding: 4px 12px;
+        background-color: #f4f4f5;
+        border-left: 3px solid #909399;
+        font-style: italic;
+      }
+    }
+  }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background-color: #e6a23c;
+  margin-left: 4px;
+  animation: blink 1s infinite;
+  vertical-align: middle;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 .detail-grid {

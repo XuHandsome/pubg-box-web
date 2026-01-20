@@ -8,12 +8,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import CommonHeader from './components/CommonHeader.vue'
+import { initFeatures } from './utils/features'
 
 const route = useRoute()
 const isReplayPage = computed(() => route.name === 'MatchReplay')
+
+onMounted(() => {
+  initFeatures()
+})
 </script>
 
 <style>
